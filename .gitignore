@@ -1,0 +1,31 @@
+# ─── Node ────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ─── Env (nunca commitar segredos!) ──────────
+.env
+.env.local
+.env.production
+
+# ─── Build outputs ───────────────────────────
+dist/
+build/
+.next/
+out/
+
+# ─── Vercel ──────────────────────────────────
+.vercel/
+
+# ─── OS ──────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── IDEs ────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
