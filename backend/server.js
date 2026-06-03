@@ -293,7 +293,7 @@ app.get('/api/search', async (req, res) => {
     console.log('[DEMO] Retornando dados de demonstração...')
     const demoScored = DEMO_COMPANIES.map(c => {
       const d = gerarDiagnosticoLocal(c)
-      return { ...c, diagnostico: d, _score: d.score, _nivel: d.nivel }
+      return { ...c, diagnostico: d, site_info: null, _score: d.score, _nivel: d.nivel }
     })
     const demoFiltered = demoScored
       .filter(c => c._nivel !== 'Baixa')
@@ -381,7 +381,7 @@ app.get('/api/search', async (req, res) => {
     // Filtra oportunidade Baixa e ordena por score (melhores primeiro)
     const scoredCompanies = companies.map((c, i) => {
       const d = gerarDiagnosticoLocal(c, sitesSignals[i])
-      return { ...c, diagnostico: d, _score: d.score, _nivel: d.nivel }
+      return { ...c, diagnostico: d, site_info: sitesSignals[i]?.info || null, _score: d.score, _nivel: d.nivel }
     })
     const resultCompanies = scoredCompanies
       .filter(c => c._nivel !== 'Baixa')
@@ -571,6 +571,59 @@ function buscarHtml(alvo, httpsAgent) {
   })
 }
 
+// Plataformas que são "construtor genérico" (argumento de venda de site próprio)
+const CONSTRUTORES_GENERICOS = ['Wix', 'Squarespace', 'Webflow', 'Google Sites']
+
+// Extrai contatos, plataforma e sinais de SEO do HTML já baixado.
+function extrairInfoSite(html) {
+  // ─ SEO on-page ─
+  const temTitle = /<title[^>]*>\s*\S/i.test(html)
+  const temDescription = /<meta[^>]+name=["']?description["']?[^>]*content=["']\s*\S/i.test(html)
+  const temH1 = /<h1[\s>]/i.test(html)
+
+  // ─ E-mail (mailto: tem prioridade; senão regex no corpo), filtrando lixo ─
+  let email = null
+  const mailto = html.match(/mailto:([^"'?\s>]+@[^"'?\s>]+)/i)
+  if (mailto) email = mailto[1]
+  if (!email) {
+    const m = html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+    if (m) email = m[0]
+  }
+  if (email && (/\.(png|jpe?g|gif|webp|svg)$/i.test(email) || /(sentry|wixpress|example\.|@2x|\.domain)/i.test(email))) {
+    email = null
+  }
+
+  // ─ WhatsApp ─
+  let whatsapp = null
+  const wa = html.match(/(?:wa\.me\/|api\.whatsapp\.com\/send\?phone=)(\+?\d{8,15})/i)
+  if (wa) whatsapp = wa[1]
+
+  // ─ Instagram (ignora caminhos que não são perfil) ─
+  let instagram = null
+  const ig = html.match(/instagram\.com\/([A-Za-z0-9_.]+)/i)
+  if (ig && !['p', 'reel', 'reels', 'explore', 'accounts', 'stories'].includes(ig[1].toLowerCase())) {
+    instagram = ig[1]
+  }
+
+  // ─ Plataforma / tecnologia ─
+  let tecnologia = null
+  const assinaturas = [
+    [/wixstatic\.com|_wix|wix\.com/i, 'Wix'],
+    [/cdn\.shopify\.com|Shopify\./i, 'Shopify'],
+    [/nuvemshop|tiendanube/i, 'Nuvemshop'],
+    [/squarespace/i, 'Squarespace'],
+    [/webflow/i, 'Webflow'],
+    [/sites\.google\.com|gstatic\.com\/sites/i, 'Google Sites'],
+    [/elementor/i, 'WordPress + Elementor'],
+    [/wp-content|wp-includes|wp-json/i, 'WordPress'],
+  ]
+  for (const [re, nome] of assinaturas) {
+    if (re.test(html)) { tecnologia = nome; break }
+  }
+
+  return { email, whatsapp, instagram, tecnologia, seo: { temTitle, temDescription, temH1 } }
+}
+
 // Faz um fetch rápido do site e extrai sinais de qualidade.
 // Nunca lança — em qualquer falha retorna o site como inacessível.
 async function analisarSite(url) {
@@ -584,7 +637,7 @@ async function analisarSite(url) {
 
     // Rede social: nem vale a pena baixar o HTML
     if (ehRedeSocial) {
-      return { acessivel: true, statusCode: 200, https: alvo.startsWith('https'), responsivo: false, tempoMs: Date.now() - inicio, anoCopyright: null, certProblema: false, ehRedeSocial: true }
+      return { acessivel: true, statusCode: 200, https: alvo.startsWith('https'), responsivo: false, tempoMs: Date.now() - inicio, anoCopyright: null, certProblema: false, ehRedeSocial: true, info: null }
     }
 
     let resp
@@ -612,9 +665,11 @@ async function analisarSite(url) {
     const anos = [...html.matchAll(/(?:©|&copy;|copyright)[^0-9]{0,15}(20\d{2})/gi)].map(m => parseInt(m[1], 10))
     const anoCopyright = anos.length ? Math.max(...anos) : null
 
-    return { acessivel: resp.status < 400, statusCode: resp.status, https, responsivo, tempoMs, anoCopyright, certProblema, ehRedeSocial: false }
+    const info = extrairInfoSite(html)
+
+    return { acessivel: resp.status < 400, statusCode: resp.status, https, responsivo, tempoMs, anoCopyright, certProblema, ehRedeSocial: false, info }
   } catch (err) {
-    return { acessivel: false, statusCode: null, https: false, responsivo: false, tempoMs: Date.now() - inicio, anoCopyright: null, certProblema: false, ehRedeSocial: false, erro: err.code || err.message }
+    return { acessivel: false, statusCode: null, https: false, responsivo: false, tempoMs: Date.now() - inicio, anoCopyright: null, certProblema: false, ehRedeSocial: false, info: null, erro: err.code || err.message }
   }
 }
 
@@ -658,6 +713,17 @@ function gerarDiagnosticoLocal(empresa, sinaisSite = null) {
       if (sinaisSite.anoCopyright && sinaisSite.anoCopyright < anoAtual - 2) {
         pontos.push({ tipo: 'alerta', icone: '📅', titulo: `Site desatualizado (rodapé de ${sinaisSite.anoCopyright})`, descricao: 'Um site visivelmente antigo passa imagem de negócio parado e desatualizado.', servico: 'Modernização do site' })
         score += 8; siteOk = false
+      }
+      const info = sinaisSite.info
+      if (info) {
+        if (!info.seo.temTitle || !info.seo.temDescription) {
+          pontos.push({ tipo: 'alerta', icone: '🔍', titulo: 'Site sem SEO básico (título/descrição ausentes)', descricao: 'Sem título e meta description bem definidos, o site perde posições no Google e atrai menos visitantes.', servico: 'Otimização de SEO on-page' })
+          score += 8; siteOk = false
+        }
+        if (CONSTRUTORES_GENERICOS.includes(info.tecnologia)) {
+          pontos.push({ tipo: 'alerta', icone: '🧩', titulo: `Site em construtor genérico (${info.tecnologia})`, descricao: 'Sites em construtores genéricos costumam ser lentos, limitados e iguais aos da concorrência — um site próprio profissional diferencia o negócio.', servico: 'Site próprio profissional' })
+          score += 6; siteOk = false
+        }
       }
       if (siteOk) {
         pontos.push({ tipo: 'ok', icone: '✅', titulo: 'Site sem problemas técnicos detectados', descricao: `Possui site funcional: ${empresa.site}`, servico: null })
