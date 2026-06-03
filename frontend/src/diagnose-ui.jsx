@@ -44,21 +44,21 @@ export const TIPO_STYLE = {
   ok: { wrap: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300', icon: 'text-emerald-400' },
 };
 
-/** Estilo do badge de temperatura (potencial de comprar sistema). */
+/** Estilo do badge de nível de oportunidade. */
 export const NIVEL_STYLE = {
-  Quente: { badge: 'bg-rose-500/10 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' },
-  Morno: { badge: 'bg-amber-500/10 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' },
-  Frio: { badge: 'bg-sky-500/10 text-sky-300 border-sky-500/30', dot: 'bg-sky-400' },
+  Alta: { badge: 'bg-rose-500/10 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' },
+  'Média': { badge: 'bg-amber-500/10 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' },
+  Baixa: { badge: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-400' },
 };
 
 export function scoreColor(score) {
-  if (score >= 60) return 'text-rose-400';
-  if (score >= 35) return 'text-amber-400';
-  return 'text-sky-400';
+  if (score >= 50) return 'text-rose-400';
+  if (score >= 20) return 'text-amber-400';
+  return 'text-emerald-400';
 }
 
 export function scoreBg(score) {
-  if (score >= 60) return 'bg-rose-500';
-  if (score >= 35) return 'bg-amber-500';
-  return 'bg-sky-500';
+  if (score >= 50) return 'bg-rose-500';
+  if (score >= 20) return 'bg-amber-500';
+  return 'bg-emerald-500';
 }
