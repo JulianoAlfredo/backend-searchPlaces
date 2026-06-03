@@ -8,7 +8,18 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 3001
 
-app.use(cors())
+app.use(
+  cors({
+    origin: [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'https://juliano.jayrobackend.com.br',
+      'https://www.juliano.jayrobackend.com.br',
+    ],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
+  })
+)
 app.use(express.json())
 app.use((_, res, next) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8')

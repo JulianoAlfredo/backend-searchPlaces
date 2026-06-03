@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { api } from '../api';
 
 const PREF_KEY = 'cacador_user_prefs';
 
@@ -39,16 +40,12 @@ export default function MessageModal({ company, searchParams, onClose }) {
   const generateMessage = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          empresa: company,
-          nicho: searchParams.nicho,
-          cidade: searchParams.cidade,
-          seuNome: seuNome || '[Seu Nome]',
-          seuServico: seuServico || 'soluções digitais para empresas',
-        }),
+      const res = await api.message({
+        empresa: company,
+        nicho: searchParams.nicho,
+        cidade: searchParams.cidade,
+        seuNome: seuNome || '[Seu Nome]',
+        seuServico: seuServico || 'soluções digitais para empresas',
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);

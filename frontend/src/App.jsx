@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import SearchForm from './components/SearchForm';
 import ResultsTable from './components/ResultsTable';
 import MessageModal from './components/MessageModal';
+import { api } from './api';
 
 const STORAGE_KEY = 'cacador_statuses';
 
@@ -30,7 +31,7 @@ export default function App() {
 
   // Check API health on mount
   useEffect(() => {
-    fetch('/api/health')
+    api.health()
       .then((r) => r.json())
       .then((d) => setIsDemo(d.demo))
       .catch(() => {});
@@ -42,9 +43,7 @@ export default function App() {
     setSearchParams({ nicho, cidade });
 
     try {
-      const res = await fetch(
-        `/api/search?query=${encodeURIComponent(nicho)}&cidade=${encodeURIComponent(cidade)}`
-      );
+      const res = await api.search(nicho, cidade);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
 
