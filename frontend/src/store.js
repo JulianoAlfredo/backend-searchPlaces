@@ -9,7 +9,6 @@
  */
 
 const LEADS_KEY = 'cacador_leads_v1';
-const LEGACY_STATUS_KEY = 'cacador_statuses';
 
 const STATUS_CONTATADO = ['em_contato', 'contatado'];
 
@@ -23,14 +22,6 @@ function readMap() {
 
 function writeMap(map) {
   localStorage.setItem(LEADS_KEY, JSON.stringify(map));
-}
-
-function readLegacyStatuses() {
-  try {
-    return JSON.parse(localStorage.getItem(LEGACY_STATUS_KEY) || '{}');
-  } catch {
-    return {};
-  }
 }
 
 function nowISO() {
@@ -55,54 +46,66 @@ export function getStats() {
 }
 
 /**
- * As N melhores oportunidades do acervo (maior score), ignorando descartadas.
+ * As N melhores oportunidades do acervo (maior score) que ainda NÃO foram
+ * contatadas — exclui em contato, contatadas e descartadas. É o que abastece
+ * o painel principal com empresas frescas para abordar.
  */
-export function getTopOportunidades(n = 10) {
+export function getTopOportunidades(n = 12) {
   return getLeads()
-    .filter((l) => l.status !== 'descartado')
+    .filter((l) => l.status === 'novo')
     .sort((a, b) => (b.diagnostico?.score || 0) - (a.diagnostico?.score || 0))
     .slice(0, n);
 }
 
+/** Indica se uma empresa já está salva no acervo. */
+export function isSaved(id) {
+  return !!readMap()[id];
+}
+
 /**
- * Mescla os resultados de uma busca no acervo, preservando o estado de CRM
- * (status, notas, data de contato) de leads já existentes. Retorna as empresas
- * já com o estado salvo aplicado, para a tela de busca refletir o acervo.
+ * Aplica o estado salvo (sem gravar) aos resultados de uma busca: marca quais
+ * já estão no acervo (`_saved`) e traz o status atual de quem está salvo. A
+ * busca é efêmera — só entra no acervo via saveLead().
  */
-export function upsertSearchResults(companies, origem = {}) {
+export function applySavedState(companies) {
   const map = readMap();
-  const legacy = readLegacyStatuses();
-  const ts = nowISO();
-
-  const enriched = companies.map((c) => {
+  return companies.map((c) => {
     const existing = map[c.id];
-    const status = existing?.status || legacy[c.id] || c.status || 'novo';
-    const lead = {
-      // dados da empresa (sempre atualizados pela busca mais recente)
-      id: c.id,
-      nome: c.nome,
-      telefone: c.telefone,
-      site: c.site,
-      endereco: c.endereco,
-      avaliacao: c.avaliacao,
-      totalAvaliacoes: c.totalAvaliacoes,
-      categoria: c.categoria,
-      diagnostico: c.diagnostico,
-      site_info: c.site_info,
-      // estado de CRM (preservado entre buscas)
-      status,
-      notas: existing?.notas || '',
-      dataUltimoContato: existing?.dataUltimoContato || null,
-      criadoEm: existing?.criadoEm || ts,
-      atualizadoEm: ts,
-      origem: existing?.origem || { nicho: origem.nicho || '', cidade: origem.cidade || '' },
-    };
-    map[c.id] = lead;
-    return lead;
+    return existing
+      ? { ...c, _saved: true, status: existing.status }
+      : { ...c, _saved: false, status: 'novo' };
   });
+}
 
+/**
+ * Salva (ou atualiza os dados de) uma empresa no acervo, iniciando o
+ * rastreamento da sua situação. Preserva o estado de CRM se já existir.
+ */
+export function saveLead(company, origem = {}) {
+  const map = readMap();
+  const existing = map[company.id];
+  const ts = nowISO();
+  const lead = {
+    id: company.id,
+    nome: company.nome,
+    telefone: company.telefone,
+    site: company.site,
+    endereco: company.endereco,
+    avaliacao: company.avaliacao,
+    totalAvaliacoes: company.totalAvaliacoes,
+    categoria: company.categoria,
+    diagnostico: company.diagnostico,
+    site_info: company.site_info,
+    status: existing?.status || 'novo',
+    notas: existing?.notas || '',
+    dataUltimoContato: existing?.dataUltimoContato || null,
+    criadoEm: existing?.criadoEm || ts,
+    atualizadoEm: ts,
+    origem: existing?.origem || { nicho: origem.nicho || '', cidade: origem.cidade || '' },
+  };
+  map[company.id] = lead;
   writeMap(map);
-  return enriched;
+  return lead;
 }
 
 /** Atualiza campos arbitrários de um lead. */

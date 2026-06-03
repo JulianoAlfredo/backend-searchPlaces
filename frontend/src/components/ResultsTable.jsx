@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Star, Globe, ExternalLink, Phone, Mail, AtSign, MessageCircle,
   Stethoscope, MessageSquare, Filter, ArrowUpDown, Search as SearchIcon,
+  BookmarkPlus, BookmarkCheck,
 } from 'lucide-react';
 import { diagnoseCompany } from '../diagnose';
 import { NIVEL_STYLE } from '../diagnose-ui';
@@ -46,7 +47,7 @@ function Canais({ info }) {
   );
 }
 
-export default function ResultsTable({ companies, onStatusChange, onGenerateMessage, onDiagnose }) {
+export default function ResultsTable({ companies, onSave, onGenerateMessage, onDiagnose }) {
   const [filter, setFilter] = useState('todos');
   const [search, setSearch] = useState('');
   const [semSite, setSemSite] = useState(false);
@@ -150,7 +151,7 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
               <th className="px-4 py-3 text-left">Site</th>
               <th className="px-4 py-3 text-left">Avaliação</th>
               <th className="px-4 py-3 text-left">Oportunidade</th>
-              <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-4 py-3 text-left">Acervo</th>
               <th className="px-4 py-3 text-right">Ações</th>
             </tr>
           </thead>
@@ -219,7 +220,7 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
                 </td>
 
                 <td className="px-4 py-3">
-                  <StatusSelect value={company.status} onChange={(v) => onStatusChange(company.id, v)} />
+                  <SaveButton saved={company._saved} onSave={() => onSave(company)} />
                 </td>
 
                 <td className="px-4 py-3 text-right">
@@ -244,6 +245,24 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
         </table>
       </div>
     </div>
+  );
+}
+
+function SaveButton({ saved, onSave }) {
+  if (saved) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
+        <BookmarkCheck className="w-3.5 h-3.5" /> Salvo
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={onSave}
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg transition-colors"
+    >
+      <BookmarkPlus className="w-3.5 h-3.5" /> Salvar
+    </button>
   );
 }
 

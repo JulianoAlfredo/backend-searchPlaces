@@ -16,7 +16,7 @@ export default function TopOpportunities({ leads, onDiagnose, onGenerateMessage 
           </span>
           <div>
             <h2 className="text-white font-bold text-base leading-tight">Top oportunidades</h2>
-            <p className="text-slate-500 text-xs">As melhores do seu acervo, de qualquer cidade</p>
+            <p className="text-slate-500 text-xs">As melhores do acervo em todo o Brasil — ainda sem contato</p>
           </div>
         </div>
         <span className="text-slate-500 text-xs bg-slate-800 px-2.5 py-1 rounded-full">{leads.length}</span>

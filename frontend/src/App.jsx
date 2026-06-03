@@ -1,16 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Users, Download, AlertTriangle, Crosshair, Building2 } from 'lucide-react';
+import { Home, Search, Users, Download, AlertTriangle, Crosshair, Building2 } from 'lucide-react';
 import SearchForm from './components/SearchForm';
 import ResultsTable from './components/ResultsTable';
 import MessageModal from './components/MessageModal';
 import DiagnoseModal from './components/DiagnoseModal';
-import TopOpportunities from './components/TopOpportunities';
+import HomeView from './components/HomeView';
 import ContactsView from './components/ContactsView';
 import { api } from './api';
 import * as store from './store';
 
 export default function App() {
-  const [view, setView] = useState('busca');
+  const [view, setView] = useState('inicio');
   const [companies, setCompanies] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -26,7 +26,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const leads = useMemo(() => store.getLeads(), [tick]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const topLeads = useMemo(() => store.getTopOportunidades(10), [tick]);
+  const topLeads = useMemo(() => store.getTopOportunidades(12), [tick]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const stats = useMemo(() => store.getStats(), [tick]);
 
@@ -44,16 +44,21 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
 
-      // Alimenta o acervo e aplica o estado de CRM salvo aos resultados
-      const enriched = store.upsertSearchResults(data.companies, { nicho, cidade });
-      setCompanies(enriched);
+      // Busca é efêmera: apenas marca quais já estão salvas, sem gravar no acervo
+      setCompanies(store.applySavedState(data.companies));
       setIsDemo(data.demo);
-      refreshStore();
     } catch (err) {
       setError(err.message);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Salvar uma empresa da busca no acervo (inicia o rastreamento)
+  const handleSave = (company) => {
+    store.saveLead(company, searchParams);
+    setCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, _saved: true, status: 'novo' } : c)));
+    refreshStore();
   };
 
   const handleStatusChange = (id, newStatus) => {
@@ -66,7 +71,7 @@ export default function App() {
   const handleRegistrarContato = (id) => { store.registrarContato(id); refreshStore(); };
   const handleRemove = (id) => {
     store.removeLead(id);
-    setCompanies((prev) => prev.filter((c) => c.id !== id));
+    setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, _saved: false } : c)));
     refreshStore();
   };
 
@@ -74,7 +79,7 @@ export default function App() {
   const handleDiagnose = (company) => { setSelectedCompany(company); setIsDiagnoseOpen(true); };
 
   const handleExportCSV = () => {
-    const rows = view === 'contatos' ? leads : companies;
+    const rows = view === 'busca' ? companies : leads;
     if (!rows.length) return;
     const headers = ['Nome', 'Telefone', 'Site', 'Endereço', 'Avaliação', 'Avaliações', 'Categoria', 'Score', 'Nível', 'Status', 'Cidade', 'Último contato', 'Notas'];
     const csv = [
@@ -95,6 +100,12 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const tabs = [
+    { id: 'inicio', label: 'Início', icon: Home },
+    { id: 'busca', label: 'Buscar', icon: Search },
+    { id: 'contatos', label: 'Contatos', icon: Users, count: stats.total },
+  ];
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="bg-slate-900/70 backdrop-blur border-b border-slate-800 sticky top-0 z-10">
@@ -110,8 +121,9 @@ export default function App() {
           </div>
 
           <nav className="hidden sm:flex items-center gap-1 bg-slate-800/60 rounded-xl p-1">
-            <TabBtn label="Buscar" icon={Search} active={view === 'busca'} onClick={() => setView('busca')} />
-            <TabBtn label="Contatos" icon={Users} active={view === 'contatos'} onClick={() => setView('contatos')} count={stats.total} />
+            {tabs.map((t) => (
+              <TabBtn key={t.id} label={t.label} icon={t.icon} active={view === t.id} onClick={() => setView(t.id)} count={t.count} />
+            ))}
           </nav>
 
           <div className="flex items-center gap-3">
@@ -129,15 +141,25 @@ export default function App() {
           </div>
         </div>
 
-        {/* Nav mobile */}
         <nav className="sm:hidden flex items-center gap-1 bg-slate-800/60 mx-6 mb-3 rounded-xl p-1">
-          <TabBtn label="Buscar" icon={Search} active={view === 'busca'} onClick={() => setView('busca')} full />
-          <TabBtn label="Contatos" icon={Users} active={view === 'contatos'} onClick={() => setView('contatos')} count={stats.total} full />
+          {tabs.map((t) => (
+            <TabBtn key={t.id} label={t.label} icon={t.icon} active={view === t.id} onClick={() => setView(t.id)} count={t.count} full />
+          ))}
         </nav>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {view === 'busca' ? (
+        {view === 'inicio' && (
+          <HomeView
+            topLeads={topLeads}
+            stats={stats}
+            onDiagnose={handleDiagnose}
+            onGenerateMessage={handleGenerateMessage}
+            onGoToSearch={() => setView('busca')}
+          />
+        )}
+
+        {view === 'busca' && (
           <>
             <SearchForm onSearch={handleSearch} isLoading={isLoading} />
 
@@ -147,17 +169,15 @@ export default function App() {
               </div>
             )}
 
-            <TopOpportunities leads={topLeads} onDiagnose={handleDiagnose} onGenerateMessage={handleGenerateMessage} />
-
             {companies.length > 0 && (
               <div>
                 <p className="text-slate-500 text-xs mb-2 flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5" />
-                  {companies.length} empresas na busca atual{searchParams.cidade ? ` — ${searchParams.nicho} em ${searchParams.cidade}` : ''}
+                  {companies.length} empresas{searchParams.cidade ? ` — ${searchParams.nicho} em ${searchParams.cidade}` : ''}. Salve as que valem a pena.
                 </p>
                 <ResultsTable
                   companies={companies}
-                  onStatusChange={handleStatusChange}
+                  onSave={handleSave}
                   onGenerateMessage={handleGenerateMessage}
                   onDiagnose={handleDiagnose}
                 />
@@ -169,12 +189,14 @@ export default function App() {
                 <Search className="w-14 h-14 text-slate-700 mb-4" />
                 <h2 className="text-xl font-semibold text-slate-400 mb-2">Comece buscando empresas</h2>
                 <p className="text-slate-600 max-w-sm text-sm">
-                  Informe um nicho e uma cidade acima. Cada resultado entra no seu acervo e alimenta o Top oportunidades.
+                  Informe um nicho e uma cidade. Depois salve as empresas que quiser acompanhar — elas vão para o seu painel e seus contatos.
                 </p>
               </div>
             )}
           </>
-        ) : (
+        )}
+
+        {view === 'contatos' && (
           <ContactsView
             leads={leads}
             stats={stats}
