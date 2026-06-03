@@ -136,6 +136,116 @@ const DEMO_COMPANIES = [
     totalAvaliacoes: 341,
     categoria: 'Escritório de Contabilidade',
     status: 'novo'
+  },
+  {
+    id: 'demo_11',
+    nome: 'JP Advocacia Empresarial',
+    telefone: '(11) 9988-1122',
+    site: null,
+    endereco: 'Rua da Mooca, 300 - Mooca, São Paulo - SP',
+    avaliacao: 3.8,
+    totalAvaliacoes: 5,
+    categoria: 'Advocacia',
+    status: 'novo'
+  },
+  {
+    id: 'demo_12',
+    nome: 'Clínica São Lucas',
+    telefone: null,
+    site: null,
+    endereco: 'Av. Celso Garcia, 1200 - Tatuapé, São Paulo - SP',
+    avaliacao: null,
+    totalAvaliacoes: 0,
+    categoria: 'Clínica Médica',
+    status: 'novo'
+  },
+  {
+    id: 'demo_13',
+    nome: 'Distribuidora Norte SP',
+    telefone: '(11) 5566-7788',
+    site: null,
+    endereco: 'Rua Voluntários da Pátria, 500 - Santana, São Paulo - SP',
+    avaliacao: 4.1,
+    totalAvaliacoes: 18,
+    categoria: 'Distribuidora',
+    status: 'novo'
+  },
+  {
+    id: 'demo_14',
+    nome: 'Escola Futuro Brilhante',
+    telefone: '(11) 3344-5566',
+    site: null,
+    endereco: 'Rua das Flores, 200 - Penha, São Paulo - SP',
+    avaliacao: 4.3,
+    totalAvaliacoes: 7,
+    categoria: 'Escola',
+    status: 'novo'
+  },
+  {
+    id: 'demo_15',
+    nome: 'Academia Power Fit',
+    telefone: '(11) 9977-8866',
+    site: 'https://www.powerfit.com.br',
+    endereco: 'Av. Rebouças, 1800 - Pinheiros, São Paulo - SP',
+    avaliacao: 3.2,
+    totalAvaliacoes: 45,
+    categoria: 'Academia',
+    status: 'novo'
+  },
+  {
+    id: 'demo_16',
+    nome: 'Imobiliária Lar & Cia',
+    telefone: '(11) 4433-2211',
+    site: null,
+    endereco: 'Rua Haddock Lobo, 600 - Cerqueira César, São Paulo - SP',
+    avaliacao: 3.5,
+    totalAvaliacoes: 12,
+    categoria: 'Imobiliária',
+    status: 'novo'
+  },
+  {
+    id: 'demo_17',
+    nome: 'Auto Peças Rápido',
+    telefone: '(11) 7788-9900',
+    site: null,
+    endereco: 'Av. do Estado, 3000 - Brás, São Paulo - SP',
+    avaliacao: 4.2,
+    totalAvaliacoes: 3,
+    categoria: 'Auto Peças',
+    status: 'novo'
+  },
+  {
+    id: 'demo_18',
+    nome: 'Dentista Sorriso Perfeito',
+    telefone: '(11) 6677-8899',
+    site: null,
+    endereco: 'Rua da Consolação, 1200 - Higienópolis, São Paulo - SP',
+    avaliacao: null,
+    totalAvaliacoes: 0,
+    categoria: 'Dentista',
+    status: 'novo'
+  },
+  {
+    id: 'demo_19',
+    nome: 'Construtora BetoCon',
+    telefone: '(11) 5544-3311',
+    site: 'https://betocon.com.br',
+    endereco: 'Av. Eng. Luis Carlos Berrini, 1500 - Vila Olímpia, São Paulo - SP',
+    avaliacao: 2.9,
+    totalAvaliacoes: 8,
+    categoria: 'Construção Civil',
+    status: 'novo'
+  },
+  {
+    id: 'demo_20',
+    nome: 'Farmácia Popular SP',
+    telefone: '(11) 3322-4455',
+    site: null,
+    endereco: 'Rua Domingos de Moraes, 800 - Vila Mariana, São Paulo - SP',
+    avaliacao: 4.0,
+    totalAvaliacoes: 34,
+    categoria: 'Farmácia',
+    status: 'novo'
   }
 ]
 
@@ -180,27 +290,53 @@ app.get('/api/search', async (req, res) => {
 
   if (!isApiKeyConfigured()) {
     console.log('[DEMO] Retornando dados de demonstração...')
-    return res.json({ companies: DEMO_COMPANIES, demo: true })
+    const demoScored = DEMO_COMPANIES.map(c => {
+      const d = gerarDiagnosticoLocal(c)
+      return { ...c, _score: d.score, _nivel: d.nivel }
+    })
+    const demoFiltered = demoScored
+      .filter(c => c._nivel !== 'Baixa')
+      .sort((a, b) => b._score - a._score)
+      .map(({ _score, _nivel, ...c }) => c)
+    return res.json({ companies: demoFiltered, demo: true })
   }
 
   try {
     const searchQuery = `${query} ${cidade}`
     const apiKey = process.env.GOOGLE_MAPS_API_KEY
 
-    // 1. Text Search — lista os places
-    const textSearchRes = await axios.get(
-      'https://maps.googleapis.com/maps/api/place/textsearch/json',
-      {
-        params: { query: searchQuery, language: 'pt-BR', key: apiKey },
-        timeout: 10000
+    // 1. Text Search com paginação — busca até 2 páginas (40 resultados)
+    let allResults = []
+    let nextPageToken = null
+    let page = 0
+
+    do {
+      const params = { query: searchQuery, language: 'pt-BR', key: apiKey }
+      if (nextPageToken) params.pagetoken = nextPageToken
+
+      const textSearchRes = await axios.get(
+        'https://maps.googleapis.com/maps/api/place/textsearch/json',
+        { params, timeout: 10000 }
+      )
+
+      if (textSearchRes.data.status !== 'OK' && page === 0) {
+        throw new Error(`Google Maps retornou: ${textSearchRes.data.status}`)
       }
-    )
 
-    if (textSearchRes.data.status !== 'OK') {
-      throw new Error(`Google Maps retornou: ${textSearchRes.data.status}`)
-    }
+      if (textSearchRes.data.results) {
+        allResults = [...allResults, ...textSearchRes.data.results]
+      }
 
-    const places = textSearchRes.data.results.slice(0, 20)
+      nextPageToken = textSearchRes.data.next_page_token
+      page++
+
+      // Google exige delay de 2s entre páginas
+      if (nextPageToken && page < 2) {
+        await new Promise(r => setTimeout(r, 2000))
+      }
+    } while (nextPageToken && page < 2)
+
+    const places = allResults
 
     // 2. Place Details — busca telefone e site de cada resultado
     const detailsPromises = places.map(place =>
@@ -236,7 +372,17 @@ app.get('/api/search', async (req, res) => {
       }
     })
 
-    res.json({ companies, demo: false })
+    // Filtra oportunidade Baixa e ordena por score (melhores primeiro)
+    const scoredCompanies = companies.map(c => {
+      const d = gerarDiagnosticoLocal(c)
+      return { ...c, _score: d.score, _nivel: d.nivel }
+    })
+    const resultCompanies = scoredCompanies
+      .filter(c => c._nivel !== 'Baixa')
+      .sort((a, b) => b._score - a._score)
+      .map(({ _score, _nivel, ...c }) => c)
+
+    res.json({ companies: resultCompanies, demo: false })
   } catch (err) {
     console.error('[ERRO] Google Maps API:', err.message)
     res.status(500).json({
@@ -251,7 +397,7 @@ app.post('/api/message', (req, res) => {
     nicho = '',
     cidade = '',
     seuNome = '[Seu Nome]',
-    seuServico = 'soluções digitais para empresas'
+    seuServico = 'criação de sites e sistemas web'
   } = req.body
 
   if (!empresa) {
@@ -329,13 +475,13 @@ Endereço: ${empresa.endereco}
 Pontos fracos identificados automaticamente:
 ${localDiagnosis.pontos.filter(p => p.tipo !== 'ok').map(p => '- ' + p.titulo).join('\n') || '- Nenhum crítico identificado'}
 
-Meu serviço: ${seuServico || 'marketing digital e criação de sites'}
-Nicho que prospecte: ${nicho || empresa.categoria}
+Meu serviço: ${seuServico || 'criação de sites e sistemas web'}
+Nicho que prospecto: ${nicho || empresa.categoria}
 
 Gere:
 1. Um diagnóstico objetivo de 2-3 frases dos pontos fracos digitais desta empresa
-2. Um pitch de 3-4 frases para abordagem inicial (tom consultivo, não vendedor)
-3. Os 3 principais serviços que eu poderia oferecer para esta empresa
+2. Um pitch de 3-4 frases para abordagem inicial (tom consultivo, não vendedor), focando APENAS em criação de site e sistemas — não mencione marketing digital, tráfego pago ou gestão de redes sociais
+3. Os 3 principais serviços de site/sistema que eu poderia oferecer para esta empresa
 
 Responda APENAS em JSON válido com esta estrutura:
 {
@@ -387,38 +533,38 @@ function gerarDiagnosticoLocal(empresa) {
   let score = 0
 
   if (!empresa.site) {
-    pontos.push({ tipo: 'critico', icone: '🌐', titulo: 'Sem site próprio', servico: 'Criação de site' })
+    pontos.push({ tipo: 'critico', icone: '🌐', titulo: 'Sem site próprio', servico: 'Criação de site profissional' })
     score += 35
   }
 
   const reviews = empresa.totalAvaliacoes || 0
   if (reviews === 0) {
-    pontos.push({ tipo: 'critico', icone: '⭐', titulo: 'Nenhuma avaliação no Google', servico: 'Gestão de reputação' })
+    pontos.push({ tipo: 'critico', icone: '⭐', titulo: 'Nenhuma avaliação no Google', servico: 'Site com integração Google Meu Negócio' })
     score += 25
   } else if (reviews < 10) {
-    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Poucas avaliações (${reviews})`, servico: 'Reputação online' })
+    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Poucas avaliações (${reviews})`, servico: 'Site com página de depoimentos' })
     score += 15
   } else if (reviews < 50) {
-    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Avaliações abaixo do ideal (${reviews})`, servico: 'Google Meu Negócio' })
+    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Avaliações abaixo do ideal (${reviews})`, servico: 'Site com integração de reviews' })
     score += 8
   }
 
   const rating = empresa.avaliacao
   if (rating !== null && rating !== undefined) {
     if (rating < 3.5) {
-      pontos.push({ tipo: 'critico', icone: '📉', titulo: `Nota crítica: ${rating}★`, servico: 'Gestão de crise de reputação' })
+      pontos.push({ tipo: 'critico', icone: '📉', titulo: `Nota crítica: ${rating}★`, servico: 'Novo site com foco em conversão' })
       score += 20
     } else if (rating < 4.2) {
-      pontos.push({ tipo: 'alerta', icone: '📊', titulo: `Nota mediana: ${rating}★`, servico: 'Otimização de GMN' })
+      pontos.push({ tipo: 'alerta', icone: '📊', titulo: `Nota mediana: ${rating}★`, servico: 'Modernização do site' })
       score += 10
     }
   } else {
-    pontos.push({ tipo: 'alerta', icone: '❓', titulo: 'Sem nota visível', servico: 'Google Meu Negócio' })
+    pontos.push({ tipo: 'alerta', icone: '❓', titulo: 'Sem nota visível', servico: 'Site com formulário de captação' })
     score += 12
   }
 
   if (!empresa.telefone || empresa.telefone === 'Não informado') {
-    pontos.push({ tipo: 'alerta', icone: '📞', titulo: 'Sem telefone cadastrado', servico: 'Perfil no Google' })
+    pontos.push({ tipo: 'alerta', icone: '📞', titulo: 'Sem telefone cadastrado', servico: 'Site com botão de contato/WhatsApp' })
     score += 10
   }
 
@@ -434,11 +580,11 @@ function gerarPitchLocal(empresa, diagnostico, seuServico, nicho, cidade) {
   const fraquezas = diagnostico.pontos.filter(p => p.tipo !== 'ok')
 
   if (fraquezas.length === 0) {
-    return `${nome}, vi que vocês têm uma boa presença digital. Trabalho com ${seuServico || 'marketing digital'} e posso ajudar a escalar ainda mais os resultados de ${empresa.nome} em ${cidade || 'sua cidade'}.`
+    return `${nome}, vi que vocês têm uma boa presença digital. Trabalho com ${seuServico || 'criação de sites e sistemas'} e posso ajudar a evoluir ainda mais a presença online de ${empresa.nome} em ${cidade || 'sua cidade'}.`
   }
 
   const principais = fraquezas.slice(0, 2).map(p => p.titulo.toLowerCase()).join(' e ')
-  return `${nome}, analisei a presença digital de ${empresa.nome} e identifiquei alguns pontos que podem estar limitando o crescimento: ${principais}. Trabalho com ${seuServico || 'soluções digitais'} para empresas de ${nicho || empresa.categoria} em ${cidade || 'sua cidade'} e já ajudei negócios similares a atrair mais clientes de forma previsível. Posso montar uma análise gratuita personalizada para vocês?`
+  return `${nome}, analisei a presença digital de ${empresa.nome} e identifiquei alguns pontos que podem estar limitando o crescimento: ${principais}. Trabalho com ${seuServico || 'criação de sites e sistemas'} para empresas de ${nicho || empresa.categoria} em ${cidade || 'sua cidade'} e já ajudei negócios similares a atrair mais clientes. Posso apresentar uma proposta personalizada para vocês?`
 }
 
 // ─── Export para Vercel (serverless) ─────────────────────────────────────────
