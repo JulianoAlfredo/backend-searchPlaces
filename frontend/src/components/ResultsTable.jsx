@@ -9,9 +9,9 @@ const STATUS_OPTIONS = [
 ];
 
 const OPORTUNIDADE_STYLE = {
-  Alta:  { bg: 'bg-red-500/10 text-red-400 border-red-500/30',    dot: 'bg-red-400',    label: 'Alta' },
-  Media: { bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30', dot: 'bg-yellow-400', label: 'Media' },
-  Baixa: { bg: 'bg-green-500/10 text-green-400 border-green-500/30',  dot: 'bg-green-400',  label: 'Baixa' },
+  Alta:   { bg: 'bg-red-500/10 text-red-400 border-red-500/30',          dot: 'bg-red-400',    label: 'Alta' },
+  'Média': { bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30', dot: 'bg-yellow-400', label: 'Média' },
+  Baixa:  { bg: 'bg-green-500/10 text-green-400 border-green-500/30',     dot: 'bg-green-400',  label: 'Baixa' },
 };
 
 function OportunidadeBadge({ nivel }) {
@@ -40,7 +40,9 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
   const [semSite, setSemSite] = useState(false);
   const [sortBy, setSortBy] = useState('oportunidade');
 
-  const withDiag = companies.map((c) => ({ ...c, _diag: diagnoseCompany(c) }));
+  // Usa o diagnóstico do backend (inclui análise de qualidade do site)
+  // e cai no cálculo local apenas como fallback (resiliência).
+  const withDiag = companies.map((c) => ({ ...c, _diag: c.diagnostico || diagnoseCompany(c) }));
 
   const filtered = withDiag
     .filter((c) => {
@@ -155,7 +157,7 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
                 </td>
 
                 <td className="px-4 py-3 text-gray-300 whitespace-nowrap">
-                  {company.telefone && company.telefone !== 'Nao informado' ? (
+                  {company.telefone && company.telefone !== 'Não informado' ? (
                     <a href={`tel:${company.telefone}`} className="hover:text-indigo-400 transition-colors">
                       {company.telefone}
                     </a>
