@@ -20,7 +20,7 @@ function formatDate(iso) {
  * arrastáveis (drag-and-drop nativo) para mover o cliente entre etapas.
  */
 export default function KanbanView({
-  leads, onStatusChange, onNotasChange, onRegistrarContato, onRemove, onDiagnose, onGenerateMessage,
+  leads, onStatusChange, onNotasChange, onRegistrarContato, onRemove, onDiagnose, onGenerateMessage, onOpenDetail,
 }) {
   const [search, setSearch] = useState('');
   const [dragId, setDragId] = useState(null);
@@ -102,6 +102,7 @@ export default function KanbanView({
                     onDiagnose={onDiagnose}
                     onGenerateMessage={onGenerateMessage}
                     onStatusChange={onStatusChange}
+                    onOpenDetail={onOpenDetail}
                   />
                 ))}
               </div>
@@ -115,17 +116,19 @@ export default function KanbanView({
 
 function KanbanCard({
   lead, dragging, onDragStart, onDragEnd, onNotasChange, onRegistrarContato,
-  onRemove, onDiagnose, onGenerateMessage, onStatusChange,
+  onRemove, onDiagnose, onGenerateMessage, onStatusChange, onOpenDetail,
 }) {
-  const nivel = NIVEL_STYLE[lead.diagnostico?.nivel] || NIVEL_STYLE.Baixa;
+  const nivel = NIVEL_STYLE[lead.diagnostico?.nivel] || NIVEL_STYLE.Frio;
   const data = formatDate(lead.dataUltimoContato);
+  const stop = (e) => e.stopPropagation();
 
   return (
     <div
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className={`bg-slate-800/70 border border-slate-700/60 rounded-xl p-3 cursor-grab active:cursor-grabbing transition-opacity ${
+      onClick={() => onOpenDetail?.(lead)}
+      className={`bg-slate-800/70 border border-slate-700/60 rounded-xl p-3 cursor-pointer transition-opacity ${
         dragging ? 'opacity-40' : 'hover:border-slate-600'
       }`}
     >
@@ -150,12 +153,13 @@ function KanbanCard({
       <input
         type="text"
         defaultValue={lead.notas}
+        onClick={stop}
         onBlur={(e) => { if (e.target.value !== lead.notas) onNotasChange(lead.id, e.target.value); }}
         placeholder="Adicionar nota..."
         className="w-full mt-2.5 bg-slate-900/60 border border-slate-700/60 text-slate-300 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 placeholder-slate-600"
       />
 
-      <div className="flex items-center justify-between mt-2.5">
+      <div className="flex items-center justify-between mt-2.5" onClick={stop}>
         <button
           onClick={() => onRegistrarContato(lead.id)}
           title="Registrar contato agora"
@@ -180,6 +184,7 @@ function KanbanCard({
       {/* Fallback de status (mobile/sem arrastar) */}
       <select
         value={lead.status}
+        onClick={stop}
         onChange={(e) => onStatusChange(lead.id, e.target.value)}
         className="md:hidden w-full mt-2 bg-slate-900 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
       >

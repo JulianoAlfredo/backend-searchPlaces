@@ -6,10 +6,10 @@ import {
 } from 'lucide-react';
 import { diagnoseCompany } from '../diagnose';
 import { NIVEL_STYLE } from '../diagnose-ui';
-import { STATUS_OPTIONS, STATUS_MAP } from '../status';
+import { STATUS_OPTIONS } from '../status';
 
 function NivelBadge({ nivel }) {
-  const s = NIVEL_STYLE[nivel] || NIVEL_STYLE.Baixa;
+  const s = NIVEL_STYLE[nivel] || NIVEL_STYLE.Frio;
   return (
     <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${s.badge}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
@@ -57,13 +57,13 @@ export default function ResultsTable({ companies, onSave, onGenerateMessage, onD
 
   const filtered = withDiag
     .filter((c) => {
-      const matchStatus = filter === 'todos' || c.status === filter;
+      const matchNivel = filter === 'todos' || c._diag.nivel === filter;
       const matchSearch =
         !search ||
         c.nome.toLowerCase().includes(search.toLowerCase()) ||
         c.categoria.toLowerCase().includes(search.toLowerCase());
       const matchSemSite = !semSite || !c.site;
-      return matchStatus && matchSearch && matchSemSite;
+      return matchNivel && matchSearch && matchSemSite;
     })
     .sort((a, b) => {
       if (sortBy === 'oportunidade') return b._diag.score - a._diag.score;
@@ -73,19 +73,19 @@ export default function ResultsTable({ companies, onSave, onGenerateMessage, onD
     });
 
   const countSemSite = companies.filter((c) => !c.site).length;
-  const countAlta = withDiag.filter((c) => c._diag.nivel === 'Alta').length;
+  const countQuente = withDiag.filter((c) => c._diag.nivel === 'Quente').length;
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-800">
         <div className="flex items-center gap-2 flex-wrap">
-          {countAlta > 0 && (
+          {countQuente > 0 && (
             <button
-              onClick={() => { setFilter('todos'); setSemSite(false); setSortBy('oportunidade'); }}
+              onClick={() => { setFilter('Quente'); setSemSite(false); setSortBy('oportunidade'); }}
               className="inline-flex items-center gap-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-semibold px-3 py-1.5 rounded-full border border-rose-500/30 transition-colors"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-              {countAlta} oportunidade{countAlta !== 1 ? 's' : ''} alta{countAlta !== 1 ? 's' : ''}
+              {countQuente} quente{countQuente !== 1 ? 's' : ''}
             </button>
           )}
           {countSemSite > 0 && (
@@ -110,16 +110,16 @@ export default function ResultsTable({ companies, onSave, onGenerateMessage, onD
               onChange={(e) => setSortBy(e.target.value)}
               className="appearance-none bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
             >
-              <option value="oportunidade">Por oportunidade</option>
+              <option value="oportunidade">Por temperatura</option>
               <option value="avaliacao">Por avaliação</option>
-              <option value="reviews">Por reviews</option>
+              <option value="reviews">Por volume</option>
             </select>
           </div>
 
           <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
-            <FilterBtn label="Todos" value="todos" current={filter} onClick={setFilter} />
-            {STATUS_OPTIONS.map((o) => (
-              <FilterBtn key={o.value} label={o.label} value={o.value} current={filter} onClick={setFilter} />
+            <FilterBtn label="Todas" value="todos" current={filter} onClick={setFilter} />
+            {['Quente', 'Morno', 'Frio'].map((n) => (
+              <FilterBtn key={n} label={n} value={n} current={filter} onClick={setFilter} />
             ))}
           </div>
 

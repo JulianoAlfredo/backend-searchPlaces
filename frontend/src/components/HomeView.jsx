@@ -1,14 +1,43 @@
-import { Archive, Flame, MessagesSquare, CheckCircle2, Search, BookmarkPlus } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Archive, Flame, MessagesSquare, CheckCircle2, RefreshCw, Trophy, AlertTriangle } from 'lucide-react';
 import TopOpportunities from './TopOpportunities';
+import { api } from '../api';
+import * as store from '../store';
 
 /**
- * Painel principal (home): visão rápida do acervo + as melhores oportunidades
- * ainda sem contato, de todo o Brasil.
+ * Painel principal (home): métricas do funil + Top oportunidades do Brasil,
+ * puxadas automaticamente uma vez por dia (cache local por data).
  */
-export default function HomeView({ topLeads, stats, onDiagnose, onGenerateMessage, onGoToSearch }) {
+export default function HomeView({ stats, savedIds, onDiagnose, onGenerateMessage, onSave }) {
+  const [destaques, setDestaques] = useState(() => store.getCachedHighlights() || []);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState(null);
+
+  const carregar = async (forcar = false) => {
+    if (!forcar) {
+      const cache = store.getCachedHighlights();
+      if (cache && cache.length) { setDestaques(cache); return; }
+    }
+    setLoading(true);
+    setErro(null);
+    try {
+      const res = await api.highlights();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao carregar destaques');
+      setDestaques(data.companies || []);
+      store.setCachedHighlights(data.companies || []);
+    } catch (e) {
+      setErro(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { carregar(false); /* eslint-disable-next-line */ }, []);
+
   const cards = [
     { label: 'No acervo', value: stats.total, Icon: Archive, color: 'text-brand-400' },
-    { label: 'Oportunidades novas', value: stats.novo, Icon: Flame, color: 'text-rose-400' },
+    { label: 'Quentes salvas', value: stats.novo, Icon: Flame, color: 'text-rose-400' },
     { label: 'Em contato', value: stats.em_contato, Icon: MessagesSquare, color: 'text-amber-400' },
     { label: 'Contatadas', value: stats.contatado, Icon: CheckCircle2, color: 'text-emerald-400' },
   ];
@@ -18,7 +47,7 @@ export default function HomeView({ topLeads, stats, onDiagnose, onGenerateMessag
       <div>
         <h2 className="text-2xl font-bold text-white tracking-tight">Painel principal</h2>
         <p className="text-slate-500 text-sm mt-1">
-          Acesso rápido às melhores oportunidades do seu acervo, em todo o Brasil.
+          Empresas de alto potencial para sistemas, puxadas do Brasil todo — e o resumo do seu funil.
         </p>
       </div>
 
@@ -34,32 +63,48 @@ export default function HomeView({ topLeads, stats, onDiagnose, onGenerateMessag
         ))}
       </div>
 
-      {stats.total === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center bg-slate-900/40 border border-slate-800 border-dashed rounded-2xl">
-          <BookmarkPlus className="w-14 h-14 text-slate-700 mb-4" />
-          <h3 className="text-xl font-semibold text-slate-400 mb-2">Seu acervo está vazio</h3>
-          <p className="text-slate-600 max-w-md text-sm mb-5">
-            Busque empresas e clique em <span className="text-slate-400 font-medium">Salvar</span> nas que valem a pena.
-            Elas aparecem aqui como oportunidades para abordar.
-          </p>
+      <section className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 border border-slate-800 rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-4 gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center">
+              <Trophy className="w-4 h-4" />
+            </span>
+            <div>
+              <h3 className="text-white font-bold text-base leading-tight">Top oportunidades do dia</h3>
+              <p className="text-slate-500 text-xs">Maior potencial de sistema (temperatura), de todo o Brasil</p>
+            </div>
+          </div>
           <button
-            onClick={onGoToSearch}
-            className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-500 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
+            onClick={() => carregar(true)}
+            disabled={loading}
+            title="Atualizar destaques"
+            className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
           >
-            <Search className="w-4 h-4" /> Buscar empresas
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Atualizar
           </button>
         </div>
-      ) : topLeads.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center bg-slate-900/40 border border-slate-800 border-dashed rounded-2xl">
-          <CheckCircle2 className="w-12 h-12 text-emerald-500/60 mb-3" />
-          <h3 className="text-lg font-semibold text-slate-400 mb-1">Tudo abordado por aqui!</h3>
-          <p className="text-slate-600 max-w-md text-sm">
-            Todas as empresas salvas já estão em contato ou contatadas. Salve novas oportunidades na busca para reabastecer o painel.
-          </p>
-        </div>
-      ) : (
-        <TopOpportunities leads={topLeads} onDiagnose={onDiagnose} onGenerateMessage={onGenerateMessage} />
-      )}
+
+        {loading && destaques.length === 0 ? (
+          <div className="space-y-2.5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-14 bg-slate-800/40 border border-slate-700/40 rounded-xl animate-pulse" />
+            ))}
+            <p className="text-slate-600 text-xs text-center pt-1">Puxando empresas de alto potencial do Brasil...</p>
+          </div>
+        ) : erro && destaques.length === 0 ? (
+          <div className="flex items-center gap-2 text-rose-400 text-sm p-3">
+            <AlertTriangle className="w-4 h-4 shrink-0" /> {erro}
+          </div>
+        ) : (
+          <TopOpportunities
+            leads={destaques}
+            savedIds={savedIds}
+            onSave={onSave}
+            onDiagnose={onDiagnose}
+            onGenerateMessage={onGenerateMessage}
+          />
+        )}
+      </section>
     </div>
   );
 }

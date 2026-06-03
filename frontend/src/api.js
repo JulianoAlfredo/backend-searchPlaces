@@ -4,6 +4,8 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 export const api = {
   health: () => fetch(`${API_BASE}/api/health`),
 
+  highlights: () => fetch(`${API_BASE}/api/highlights`),
+
   search: (query, cidade) =>
     fetch(`${API_BASE}/api/search?query=${encodeURIComponent(query)}&cidade=${encodeURIComponent(cidade)}`),
 
