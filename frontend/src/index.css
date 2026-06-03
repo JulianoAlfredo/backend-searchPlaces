@@ -2,25 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: #374151 #111827;
+  scrollbar-color: #334155 #0f172a;
 }
 
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 
 *::-webkit-scrollbar-track {
-  background: #111827;
+  background: transparent;
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #374151;
-  border-radius: 4px;
+  background-color: #334155;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #475569;
+}
+
+html {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background-color: #030712;
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+/* Realce sutil de foco consistente */
+::selection {
+  background-color: rgba(99, 102, 241, 0.3);
 }

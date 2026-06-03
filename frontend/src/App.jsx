@@ -1,28 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { Home, Search, Users, Download, AlertTriangle, Crosshair, Building2 } from 'lucide-react';
 import SearchForm from './components/SearchForm';
 import ResultsTable from './components/ResultsTable';
 import MessageModal from './components/MessageModal';
 import DiagnoseModal from './components/DiagnoseModal';
+import HomeView from './components/HomeView';
+import ContactsTab from './components/ContactsTab';
 import { api } from './api';
-import { diagnoseCompany } from './diagnose';
-
-const STORAGE_KEY = 'cacador_statuses';
-
-function loadSavedStatuses() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function saveStatus(id, status) {
-  const current = loadSavedStatuses();
-  current[id] = status;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
-}
+import * as store from './store';
 
 export default function App() {
+  const [view, setView] = useState('inicio');
   const [companies, setCompanies] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -31,13 +19,19 @@ export default function App() {
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDiagnoseOpen, setIsDiagnoseOpen] = useState(false);
+  const [tick, setTick] = useState(0); // força releitura do acervo
 
-  // Check API health on mount
+  const refreshStore = () => setTick((t) => t + 1);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const leads = useMemo(() => store.getLeads(), [tick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const topLeads = useMemo(() => store.getTopOportunidades(12), [tick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stats = useMemo(() => store.getStats(), [tick]);
+
   useEffect(() => {
-    api.health()
-      .then((r) => r.json())
-      .then((d) => setIsDemo(d.demo))
-      .catch(() => {});
+    api.health().then((r) => r.json()).then((d) => setIsDemo(d.demo)).catch(() => {});
   }, []);
 
   const handleSearch = async (nicho, cidade) => {
@@ -50,13 +44,8 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
 
-      // Apply persisted statuses
-      const saved = loadSavedStatuses();
-      const withStatus = data.companies.map((c) => ({
-        ...c,
-        status: saved[c.id] || c.status,
-      }));
-      setCompanies(withStatus);
+      // Busca é efêmera: apenas marca quais já estão salvas, sem gravar no acervo
+      setCompanies(store.applySavedState(data.companies));
       setIsDemo(data.demo);
     } catch (err) {
       setError(err.message);
@@ -65,168 +54,186 @@ export default function App() {
     }
   };
 
+  // Salvar uma empresa da busca no acervo (inicia o rastreamento)
+  const handleSave = (company) => {
+    store.saveLead(company, searchParams);
+    setCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, _saved: true, status: 'novo' } : c)));
+    refreshStore();
+  };
+
   const handleStatusChange = (id, newStatus) => {
-    setCompanies((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: newStatus } : c))
-    );
-    saveStatus(id, newStatus);
+    store.setStatus(id, newStatus);
+    setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, status: newStatus } : c)));
+    refreshStore();
   };
 
-  const handleGenerateMessage = (company) => {
-    setSelectedCompany(company);
-    setIsModalOpen(true);
+  const handleNotasChange = (id, notas) => { store.setNotas(id, notas); refreshStore(); };
+  const handleRegistrarContato = (id) => { store.registrarContato(id); refreshStore(); };
+  const handleRemove = (id) => {
+    store.removeLead(id);
+    setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, _saved: false } : c)));
+    refreshStore();
   };
 
-  const handleDiagnose = (company) => {
-    setSelectedCompany(company);
-    setIsDiagnoseOpen(true);
-  };
+  const handleGenerateMessage = (company) => { setSelectedCompany(company); setIsModalOpen(true); };
+  const handleDiagnose = (company) => { setSelectedCompany(company); setIsDiagnoseOpen(true); };
 
   const handleExportCSV = () => {
-    const headers = ['Nome', 'Telefone', 'Site', 'Endereço', 'Avaliação', 'Avaliações', 'Categoria', 'Status'];
-    const rows = companies.map((c) => [
-      `"${c.nome}"`,
-      `"${c.telefone}"`,
-      `"${c.site || ''}"`,
-      `"${c.endereco}"`,
-      c.avaliacao ?? '',
-      c.totalAvaliacoes ?? '',
-      `"${c.categoria}"`,
-      `"${c.status}"`,
-    ]);
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const rows = view === 'busca' ? companies : leads;
+    if (!rows.length) return;
+    const headers = ['Nome', 'Telefone', 'Site', 'Endereço', 'Avaliação', 'Avaliações', 'Categoria', 'Score', 'Nível', 'Status', 'Cidade', 'Último contato', 'Notas'];
+    const csv = [
+      headers.join(','),
+      ...rows.map((c) => [
+        `"${c.nome}"`, `"${c.telefone}"`, `"${c.site || ''}"`, `"${c.endereco}"`,
+        c.avaliacao ?? '', c.totalAvaliacoes ?? '', `"${c.categoria}"`,
+        c.diagnostico?.score ?? '', `"${c.diagnostico?.nivel || ''}"`, `"${c.status}"`,
+        `"${c.origem?.cidade || searchParams.cidade || ''}"`, `"${c.dataUltimoContato || ''}"`, `"${(c.notas || '').replace(/"/g, "'")}"`,
+      ].join(',')),
+    ].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${searchParams.nicho}-${searchParams.cidade}-${Date.now()}.csv`;
+    a.download = `cacador-${view}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const stats = {
-    total: companies.length,
-    novos: companies.filter((c) => c.status === 'novo').length,
-    em_contato: companies.filter((c) => c.status === 'em_contato').length,
-    contatado: companies.filter((c) => c.status === 'contatado').length,
-    descartado: companies.filter((c) => c.status === 'descartado').length,
-  };
+  const tabs = [
+    { id: 'inicio', label: 'Início', icon: Home },
+    { id: 'busca', label: 'Buscar', icon: Search },
+    { id: 'contatos', label: 'Contatos', icon: Users, count: stats.total },
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      {/* ── Header ── */}
-      <header className="bg-gray-900/80 backdrop-blur border-b border-gray-800 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <header className="bg-slate-900/70 backdrop-blur border-b border-slate-800 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-6 py-3.5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="text-3xl">🎯</span>
+            <span className="w-9 h-9 rounded-xl bg-brand-500/15 text-brand-400 flex items-center justify-center">
+              <Crosshair className="w-5 h-5" />
+            </span>
             <div>
-              <h1 className="font-bold text-xl text-white leading-tight">Caçador de Clientes</h1>
-              <p className="text-gray-500 text-xs">Prospecção inteligente via Google Maps</p>
+              <h1 className="font-bold text-base text-white leading-tight">Caçador de Clientes</h1>
+              <p className="text-slate-500 text-xs">Prospecção inteligente via Google Maps</p>
             </div>
           </div>
+
+          <nav className="hidden sm:flex items-center gap-1 bg-slate-800/60 rounded-xl p-1">
+            {tabs.map((t) => (
+              <TabBtn key={t.id} label={t.label} icon={t.icon} active={view === t.id} onClick={() => setView(t.id)} count={t.count} />
+            ))}
+          </nav>
+
           <div className="flex items-center gap-3">
             {isDemo && (
-              <span className="bg-yellow-500/10 text-yellow-400 text-xs px-3 py-1.5 rounded-full border border-yellow-500/30 font-medium">
-                ⚠️ Modo Demonstração
+              <span className="hidden md:inline-flex items-center gap-1.5 bg-amber-500/10 text-amber-400 text-xs px-3 py-1.5 rounded-full border border-amber-500/30 font-medium">
+                <AlertTriangle className="w-3.5 h-3.5" /> Demonstração
               </span>
             )}
-            {companies.length > 0 && (
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm px-4 py-2 rounded-lg border border-gray-700 transition-colors"
-              >
-                <span>📥</span> Exportar CSV
-              </button>
-            )}
+            <button
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm px-4 py-2 rounded-lg border border-slate-700 transition-colors"
+            >
+              <Download className="w-4 h-4" /> <span className="hidden sm:inline">Exportar CSV</span>
+            </button>
           </div>
         </div>
+
+        <nav className="sm:hidden flex items-center gap-1 bg-slate-800/60 mx-6 mb-3 rounded-xl p-1">
+          {tabs.map((t) => (
+            <TabBtn key={t.id} label={t.label} icon={t.icon} active={view === t.id} onClick={() => setView(t.id)} count={t.count} full />
+          ))}
+        </nav>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
-        {/* ── Search Form ── */}
-        <SearchForm onSearch={handleSearch} isLoading={isLoading} />
-
-        {/* ── Error ── */}
-        {error && (
-          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
-            ❌ {error}
-          </div>
+      <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {view === 'inicio' && (
+          <HomeView
+            topLeads={topLeads}
+            stats={stats}
+            onDiagnose={handleDiagnose}
+            onGenerateMessage={handleGenerateMessage}
+            onGoToSearch={() => setView('busca')}
+          />
         )}
 
-        {/* ── Stats + Table ── */}
-        {companies.length > 0 && (
+        {view === 'busca' && (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <StatCard label="Total encontrado" value={stats.total} icon="🏢" color="indigo" />
-              <StatCard label="Novos" value={stats.novos} icon="🆕" color="blue" />
-              <StatCard label="Em Contato" value={stats.em_contato} icon="💬" color="yellow" />
-              <StatCard label="Contatados" value={stats.contatado} icon="✅" color="green" />
-            </div>
+            <SearchForm onSearch={handleSearch} isLoading={isLoading} />
 
-            <ResultsTable
-              companies={companies}
-              onStatusChange={handleStatusChange}
-              onGenerateMessage={handleGenerateMessage}
-              onDiagnose={handleDiagnose}
-            />
+            {error && (
+              <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-sm flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
+              </div>
+            )}
+
+            {companies.length > 0 && (
+              <div>
+                <p className="text-slate-500 text-xs mb-2 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5" />
+                  {companies.length} empresas{searchParams.cidade ? ` — ${searchParams.nicho} em ${searchParams.cidade}` : ''}. Salve as que valem a pena.
+                </p>
+                <ResultsTable
+                  companies={companies}
+                  onSave={handleSave}
+                  onGenerateMessage={handleGenerateMessage}
+                  onDiagnose={handleDiagnose}
+                />
+              </div>
+            )}
+
+            {!isLoading && companies.length === 0 && !error && (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <Search className="w-14 h-14 text-slate-700 mb-4" />
+                <h2 className="text-xl font-semibold text-slate-400 mb-2">Comece buscando empresas</h2>
+                <p className="text-slate-600 max-w-sm text-sm">
+                  Informe um nicho e uma cidade. Depois salve as empresas que quiser acompanhar — elas vão para o seu painel e seus contatos.
+                </p>
+              </div>
+            )}
           </>
         )}
 
-        {/* ── Empty State ── */}
-        {!isLoading && companies.length === 0 && !error && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="text-7xl mb-5">🔍</div>
-            <h2 className="text-2xl font-semibold text-gray-400 mb-2">
-              Comece buscando empresas
-            </h2>
-            <p className="text-gray-600 max-w-sm">
-              Digite um nicho e uma cidade acima para encontrar potenciais clientes no Google Maps.
-            </p>
-            {isDemo && (
-              <p className="mt-4 text-yellow-500/70 text-sm">
-                Modo demonstração ativo — os resultados serão dados fictícios.
-              </p>
-            )}
-          </div>
+        {view === 'contatos' && (
+          <ContactsTab
+            leads={leads}
+            stats={stats}
+            onStatusChange={handleStatusChange}
+            onNotasChange={handleNotasChange}
+            onRegistrarContato={handleRegistrarContato}
+            onRemove={handleRemove}
+            onDiagnose={handleDiagnose}
+            onGenerateMessage={handleGenerateMessage}
+          />
         )}
       </main>
 
-      {/* ── Message Modal ── */}
       {isModalOpen && selectedCompany && (
-        <MessageModal
-          company={selectedCompany}
-          searchParams={searchParams}
-          onClose={() => setIsModalOpen(false)}
-        />
+        <MessageModal company={selectedCompany} searchParams={searchParams} onClose={() => setIsModalOpen(false)} />
       )}
-
-      {/* ── Diagnose Modal ── */}
       {isDiagnoseOpen && selectedCompany && (
-        <DiagnoseModal
-          company={selectedCompany}
-          searchParams={searchParams}
-          onClose={() => setIsDiagnoseOpen(false)}
-        />
+        <DiagnoseModal company={selectedCompany} searchParams={searchParams} onClose={() => setIsDiagnoseOpen(false)} />
       )}
     </div>
   );
 }
 
-function StatCard({ label, value, icon, color }) {
-  const colors = {
-    indigo: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
-    blue: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-    yellow: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20',
-    green: 'text-green-400 bg-green-500/10 border-green-500/20',
-  };
-
+function TabBtn({ label, icon: Icon, active, onClick, count, full }) {
   return (
-    <div className={`rounded-xl border p-4 ${colors[color]}`}>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-lg">{icon}</span>
-        <span className="text-xs opacity-70 font-medium uppercase tracking-wide">{label}</span>
-      </div>
-      <p className="text-3xl font-bold">{value}</p>
-    </div>
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center justify-center gap-2 text-sm font-medium px-4 py-2 rounded-lg transition-colors ${full ? 'flex-1' : ''} ${
+        active ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+      }`}
+    >
+      <Icon className="w-4 h-4" /> {label}
+      {count > 0 && (
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20' : 'bg-slate-700 text-slate-300'}`}>
+          {count}
+        </span>
+      )}
+    </button>
   );
 }

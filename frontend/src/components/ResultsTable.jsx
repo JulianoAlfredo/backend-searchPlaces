@@ -1,46 +1,59 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
+import {
+  Star, Globe, ExternalLink, Phone, Mail, AtSign, MessageCircle,
+  Stethoscope, MessageSquare, Filter, ArrowUpDown, Search as SearchIcon,
+  BookmarkPlus, BookmarkCheck,
+} from 'lucide-react';
 import { diagnoseCompany } from '../diagnose';
+import { NIVEL_STYLE } from '../diagnose-ui';
+import { STATUS_OPTIONS, STATUS_MAP } from '../status';
 
-const STATUS_OPTIONS = [
-  { value: 'novo', label: 'Novo', bg: 'bg-blue-500/10 text-blue-400 border-blue-500/30' },
-  { value: 'em_contato', label: 'Em Contato', bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' },
-  { value: 'contatado', label: 'Contatado', bg: 'bg-green-500/10 text-green-400 border-green-500/30' },
-  { value: 'descartado', label: 'Descartado', bg: 'bg-red-500/10 text-red-400 border-red-500/30' },
-];
-
-const OPORTUNIDADE_STYLE = {
-  Alta:  { bg: 'bg-red-500/10 text-red-400 border-red-500/30',    dot: 'bg-red-400',    label: 'Alta' },
-  Media: { bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30', dot: 'bg-yellow-400', label: 'Media' },
-  Baixa: { bg: 'bg-green-500/10 text-green-400 border-green-500/30',  dot: 'bg-green-400',  label: 'Baixa' },
-};
-
-function OportunidadeBadge({ nivel }) {
-  const s = OPORTUNIDADE_STYLE[nivel] || OPORTUNIDADE_STYLE['Baixa'];
+function NivelBadge({ nivel }) {
+  const s = NIVEL_STYLE[nivel] || NIVEL_STYLE.Baixa;
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${s.bg}`}>
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${s.badge}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {nivel}
     </span>
   );
 }
 
-function StarRating({ value }) {
-  if (!value) return <span className="text-gray-600 text-xs">--</span>;
+function Stars({ value }) {
+  if (!value) return <span className="text-slate-600 text-xs">—</span>;
   return (
-    <span className="flex items-center gap-1 text-sm">
-      <span className="text-yellow-400">*</span>
-      <span className="text-gray-300 font-medium">{value.toFixed(1)}</span>
+    <span className="inline-flex items-center gap-1 text-sm">
+      <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+      <span className="text-slate-300 font-medium">{value.toFixed(1)}</span>
     </span>
   );
 }
 
-export default function ResultsTable({ companies, onStatusChange, onGenerateMessage, onDiagnose }) {
+function Canais({ info }) {
+  if (!info) return null;
+  const itens = [
+    info.email && { Icon: Mail, title: info.email },
+    info.whatsapp && { Icon: MessageCircle, title: `WhatsApp: ${info.whatsapp}` },
+    info.instagram && { Icon: AtSign, title: `@${info.instagram}` },
+  ].filter(Boolean);
+  if (!itens.length) return null;
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      {itens.map(({ Icon, title }, i) => (
+        <span key={i} title={title} className="text-slate-500">
+          <Icon className="w-3.5 h-3.5" />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export default function ResultsTable({ companies, onSave, onGenerateMessage, onDiagnose }) {
   const [filter, setFilter] = useState('todos');
   const [search, setSearch] = useState('');
   const [semSite, setSemSite] = useState(false);
   const [sortBy, setSortBy] = useState('oportunidade');
 
-  const withDiag = companies.map((c) => ({ ...c, _diag: diagnoseCompany(c) }));
+  const withDiag = companies.map((c) => ({ ...c, _diag: c.diagnostico || diagnoseCompany(c) }));
 
   const filtered = withDiag
     .filter((c) => {
@@ -63,105 +76,114 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
   const countAlta = withDiag.filter((c) => c._diag.nivel === 'Alta').length;
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-gray-800">
-        <div className="flex items-center gap-3 flex-wrap">
+    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-800">
+        <div className="flex items-center gap-2 flex-wrap">
           {countAlta > 0 && (
             <button
               onClick={() => { setFilter('todos'); setSemSite(false); setSortBy('oportunidade'); }}
-              className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold px-3 py-1.5 rounded-full border border-red-500/30 transition-colors"
+              className="inline-flex items-center gap-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-semibold px-3 py-1.5 rounded-full border border-rose-500/30 transition-colors"
             >
-              {countAlta} oportunidade{countAlta !== 1 ? 's' : ''} Alta
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+              {countAlta} oportunidade{countAlta !== 1 ? 's' : ''} alta{countAlta !== 1 ? 's' : ''}
             </button>
           )}
           {countSemSite > 0 && (
             <button
               onClick={() => setSemSite((v) => !v)}
-              className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
                 semSite
                   ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
-                  : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'
+                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
               }`}
             >
-              {semSite ? `Sem site (${countSemSite})` : `Filtrar sem site (${countSemSite})`}
+              <Globe className="w-3.5 h-3.5" /> Sem site ({countSemSite})
             </button>
           )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-gray-400 text-xs rounded-lg px-2 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-          >
-            <option value="oportunidade">Por Oportunidade</option>
-            <option value="avaliacao">Por Avaliacao</option>
-            <option value="reviews">Por Reviews</option>
-          </select>
+          <div className="relative">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="appearance-none bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
+            >
+              <option value="oportunidade">Por oportunidade</option>
+              <option value="avaliacao">Por avaliação</option>
+              <option value="reviews">Por reviews</option>
+            </select>
+          </div>
 
-          <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
             <FilterBtn label="Todos" value="todos" current={filter} onClick={setFilter} />
             {STATUS_OPTIONS.map((o) => (
               <FilterBtn key={o.value} label={o.label} value={o.value} current={filter} onClick={setFilter} />
             ))}
           </div>
 
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filtrar por nome..."
-            className="bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder-gray-600 w-44"
-          />
+          <div className="relative">
+            <SearchIcon className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filtrar por nome..."
+              className="bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 placeholder-slate-600 w-44"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="px-4 py-2 border-b border-gray-800/60 text-gray-600 text-xs">
+      <div className="px-4 py-2 border-b border-slate-800/60 text-slate-500 text-xs flex items-center gap-1.5">
+        <Filter className="w-3 h-3" />
         {filtered.length} empresa{filtered.length !== 1 ? 's' : ''} exibida{filtered.length !== 1 ? 's' : ''}
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wider">
+            <tr className="border-b border-slate-800 text-slate-500 text-xs uppercase tracking-wider">
               <th className="px-4 py-3 text-left w-8">#</th>
               <th className="px-4 py-3 text-left">Empresa</th>
-              <th className="px-4 py-3 text-left">Telefone</th>
+              <th className="px-4 py-3 text-left">Contato</th>
               <th className="px-4 py-3 text-left">Site</th>
-              <th className="px-4 py-3 text-left">Avaliacao</th>
+              <th className="px-4 py-3 text-left">Avaliação</th>
               <th className="px-4 py-3 text-left">Oportunidade</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-right">Acoes</th>
+              <th className="px-4 py-3 text-left">Acervo</th>
+              <th className="px-4 py-3 text-right">Ações</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800/60">
+          <tbody className="divide-y divide-slate-800/60">
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-center py-12 text-gray-600">
+                <td colSpan={8} className="text-center py-12 text-slate-600">
                   Nenhuma empresa encontrada com esses filtros.
                 </td>
               </tr>
             )}
             {filtered.map((company, i) => (
-              <tr key={company.id} className="hover:bg-gray-800/40 transition-colors">
-                <td className="px-4 py-3 text-gray-600">{i + 1}</td>
+              <tr key={company.id} className="hover:bg-slate-800/40 transition-colors">
+                <td className="px-4 py-3 text-slate-600">{i + 1}</td>
 
                 <td className="px-4 py-3 max-w-xs">
-                  <div className="font-medium text-gray-200 truncate">{company.nome}</div>
-                  <div className="text-gray-500 text-xs mt-0.5 truncate">{company.endereco}</div>
-                  <span className="inline-block text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full mt-1">
+                  <div className="font-medium text-slate-200 truncate">{company.nome}</div>
+                  <div className="text-slate-500 text-xs mt-0.5 truncate">{company.endereco}</div>
+                  <span className="inline-block text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full mt-1">
                     {company.categoria}
                   </span>
                 </td>
 
-                <td className="px-4 py-3 text-gray-300 whitespace-nowrap">
-                  {company.telefone && company.telefone !== 'Nao informado' ? (
-                    <a href={`tel:${company.telefone}`} className="hover:text-indigo-400 transition-colors">
-                      {company.telefone}
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {company.telefone && company.telefone !== 'Não informado' ? (
+                    <a href={`tel:${company.telefone}`} className="inline-flex items-center gap-1.5 text-slate-300 hover:text-brand-400 transition-colors">
+                      <Phone className="w-3.5 h-3.5" /> {company.telefone}
                     </a>
                   ) : (
-                    <span className="text-gray-600 text-xs">--</span>
+                    <span className="text-slate-600 text-xs">—</span>
                   )}
+                  <Canais info={company.site_info} />
                 </td>
 
                 <td className="px-4 py-3">
@@ -170,59 +192,50 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
                       href={company.site}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-indigo-400 hover:text-indigo-300 text-xs truncate max-w-[150px] block transition-colors"
+                      className="inline-flex items-center gap-1 text-brand-400 hover:text-brand-300 text-xs truncate max-w-[150px] transition-colors"
                       title={company.site}
                     >
-                      {new URL(company.site).hostname}
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                      {safeHost(company.site)}
                     </a>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-full font-medium">
-                      Sem site
+                      <Globe className="w-3 h-3" /> Sem site
                     </span>
                   )}
                 </td>
 
                 <td className="px-4 py-3">
-                  <StarRating value={company.avaliacao} />
+                  <Stars value={company.avaliacao} />
                   {company.totalAvaliacoes > 0 && (
-                    <div className="text-gray-600 text-xs mt-0.5">
-                      {company.totalAvaliacoes} av.
-                    </div>
+                    <div className="text-slate-600 text-xs mt-0.5">{company.totalAvaliacoes} av.</div>
                   )}
                 </td>
 
                 <td className="px-4 py-3">
-                  <OportunidadeBadge nivel={company._diag.nivel} />
-                  <div className="text-gray-600 text-xs mt-1">
-                    {company._diag.pontos.filter(p => p.tipo !== 'ok').length} pontos fracos
+                  <NivelBadge nivel={company._diag.nivel} />
+                  <div className="text-slate-600 text-xs mt-1">
+                    {company._diag.pontos.filter((p) => p.tipo !== 'ok').length} pontos fracos
                   </div>
                 </td>
 
                 <td className="px-4 py-3">
-                  <select
-                    value={company.status}
-                    onChange={(e) => onStatusChange(company.id, e.target.value)}
-                    className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                  >
-                    {STATUS_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
+                  <SaveButton saved={company._saved} onSave={() => onSave(company)} />
                 </td>
 
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button
                       onClick={() => onDiagnose(company)}
-                      className="bg-purple-600/80 hover:bg-purple-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                      className="inline-flex items-center gap-1.5 bg-violet-600/80 hover:bg-violet-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
                     >
-                      Diagnostico
+                      <Stethoscope className="w-3.5 h-3.5" /> Diagnóstico
                     </button>
                     <button
                       onClick={() => onGenerateMessage(company)}
-                      className="bg-indigo-600/80 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                      className="inline-flex items-center gap-1.5 bg-brand-600/80 hover:bg-brand-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
                     >
-                      Mensagem
+                      <MessageSquare className="w-3.5 h-3.5" /> Mensagem
                     </button>
                   </div>
                 </td>
@@ -235,16 +248,56 @@ export default function ResultsTable({ companies, onStatusChange, onGenerateMess
   );
 }
 
+function SaveButton({ saved, onSave }) {
+  if (saved) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
+        <BookmarkCheck className="w-3.5 h-3.5" /> Salvo
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={onSave}
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg transition-colors"
+    >
+      <BookmarkPlus className="w-3.5 h-3.5" /> Salvar
+    </button>
+  );
+}
+
+export function StatusSelect({ value, onChange }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
+    >
+      {STATUS_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
+
 function FilterBtn({ label, value, current, onClick }) {
   const active = current === value;
   return (
     <button
       onClick={() => onClick(value)}
       className={`text-xs px-3 py-1.5 rounded-md transition-colors font-medium ${
-        active ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
+        active ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
       }`}
     >
       {label}
     </button>
   );
+}
+
+function safeHost(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
 }
