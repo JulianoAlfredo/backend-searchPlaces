@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import SearchForm from './components/SearchForm';
 import ResultsTable from './components/ResultsTable';
 import MessageModal from './components/MessageModal';
+import DiagnoseModal from './components/DiagnoseModal';
 import { api } from './api';
+import { diagnoseCompany } from './diagnose';
 
 const STORAGE_KEY = 'cacador_statuses';
 
@@ -28,6 +30,7 @@ export default function App() {
   const [searchParams, setSearchParams] = useState({ nicho: '', cidade: '' });
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDiagnoseOpen, setIsDiagnoseOpen] = useState(false);
 
   // Check API health on mount
   useEffect(() => {
@@ -72,6 +75,11 @@ export default function App() {
   const handleGenerateMessage = (company) => {
     setSelectedCompany(company);
     setIsModalOpen(true);
+  };
+
+  const handleDiagnose = (company) => {
+    setSelectedCompany(company);
+    setIsDiagnoseOpen(true);
   };
 
   const handleExportCSV = () => {
@@ -159,6 +167,7 @@ export default function App() {
               companies={companies}
               onStatusChange={handleStatusChange}
               onGenerateMessage={handleGenerateMessage}
+              onDiagnose={handleDiagnose}
             />
           </>
         )}
@@ -188,6 +197,15 @@ export default function App() {
           company={selectedCompany}
           searchParams={searchParams}
           onClose={() => setIsModalOpen(false)}
+        />
+      )}
+
+      {/* ── Diagnose Modal ── */}
+      {isDiagnoseOpen && selectedCompany && (
+        <DiagnoseModal
+          company={selectedCompany}
+          searchParams={searchParams}
+          onClose={() => setIsDiagnoseOpen(false)}
         />
       )}
     </div>

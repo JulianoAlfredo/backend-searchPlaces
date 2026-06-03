@@ -285,11 +285,161 @@ app.get('/api/health', (_, res) => {
   res.json({
     ok: true,
     demo: !isApiKeyConfigured(),
+    hasOpenAI: !!(process.env.OPENAI_API_KEY),
     message: isApiKeyConfigured()
       ? 'Google Maps API configurada ✅'
       : 'Modo demonstração ativo ⚠️  — configure GOOGLE_MAPS_API_KEY no .env'
   })
 })
+
+// ─── Rota: Diagnóstico com IA (OpenAI opcional) ───────────────────────────────
+app.post('/api/diagnose', async (req, res) => {
+  const { empresa, nicho = '', cidade = '', seuServico = '' } = req.body
+
+  if (!empresa) {
+    return res.status(400).json({ error: 'Dados da empresa são obrigatórios.' })
+  }
+
+  const openaiKey = process.env.OPENAI_API_KEY
+
+  // ─ Diagnóstico local (sem IA) ─────────────────────────────────────────────
+  const localDiagnosis = gerarDiagnosticoLocal(empresa)
+
+  if (!openaiKey) {
+    return res.json({
+      diagnostico: localDiagnosis,
+      pitch: gerarPitchLocal(empresa, localDiagnosis, seuServico, nicho, cidade),
+      fonte: 'local',
+    })
+  }
+
+  // ─ Diagnóstico com OpenAI ────────────────────────────────────────────────
+  try {
+    const prompt = `Você é um consultor de marketing digital especialista em prospecção B2B.
+Analise os dados desta empresa e gere um diagnóstico de oportunidades:
+
+Empresa: ${empresa.nome}
+Categoria: ${empresa.categoria}
+Cidade: ${cidade || 'não informada'}
+Possui site: ${empresa.site ? 'SIM — ' + empresa.site : 'NÃO'}
+Telefone: ${empresa.telefone || 'não informado'}
+Avaliação Google Maps: ${empresa.avaliacao ? empresa.avaliacao + ' estrelas com ' + empresa.totalAvaliacoes + ' avaliações' : 'sem avaliações'}
+Endereço: ${empresa.endereco}
+
+Pontos fracos identificados automaticamente:
+${localDiagnosis.pontos.filter(p => p.tipo !== 'ok').map(p => '- ' + p.titulo).join('\n') || '- Nenhum crítico identificado'}
+
+Meu serviço: ${seuServico || 'marketing digital e criação de sites'}
+Nicho que prospecte: ${nicho || empresa.categoria}
+
+Gere:
+1. Um diagnóstico objetivo de 2-3 frases dos pontos fracos digitais desta empresa
+2. Um pitch de 3-4 frases para abordagem inicial (tom consultivo, não vendedor)
+3. Os 3 principais serviços que eu poderia oferecer para esta empresa
+
+Responda APENAS em JSON válido com esta estrutura:
+{
+  "diagnostico": "texto do diagnóstico...",
+  "pitch": "texto do pitch...",
+  "servicos": ["serviço 1", "serviço 2", "serviço 3"]
+}`
+
+    const openaiRes = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        max_tokens: 500,
+        response_format: { type: 'json_object' },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${openaiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 15000,
+      }
+    )
+
+    const content = JSON.parse(openaiRes.data.choices[0].message.content)
+    return res.json({
+      diagnostico: { ...localDiagnosis, textoIA: content.diagnostico },
+      pitch: content.pitch,
+      servicos: content.servicos || localDiagnosis.servicos,
+      fonte: 'openai',
+    })
+  } catch (err) {
+    console.error('[OpenAI erro]', err.message)
+    // Fallback para diagnóstico local se a IA falhar
+    return res.json({
+      diagnostico: localDiagnosis,
+      pitch: gerarPitchLocal(empresa, localDiagnosis, seuServico, nicho, cidade),
+      fonte: 'local_fallback',
+      erro: 'OpenAI indisponível — usando análise local',
+    })
+  }
+})
+
+// ─── Helpers de diagnóstico local ────────────────────────────────────────────
+function gerarDiagnosticoLocal(empresa) {
+  const pontos = []
+  let score = 0
+
+  if (!empresa.site) {
+    pontos.push({ tipo: 'critico', icone: '🌐', titulo: 'Sem site próprio', servico: 'Criação de site' })
+    score += 35
+  }
+
+  const reviews = empresa.totalAvaliacoes || 0
+  if (reviews === 0) {
+    pontos.push({ tipo: 'critico', icone: '⭐', titulo: 'Nenhuma avaliação no Google', servico: 'Gestão de reputação' })
+    score += 25
+  } else if (reviews < 10) {
+    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Poucas avaliações (${reviews})`, servico: 'Reputação online' })
+    score += 15
+  } else if (reviews < 50) {
+    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Avaliações abaixo do ideal (${reviews})`, servico: 'Google Meu Negócio' })
+    score += 8
+  }
+
+  const rating = empresa.avaliacao
+  if (rating !== null && rating !== undefined) {
+    if (rating < 3.5) {
+      pontos.push({ tipo: 'critico', icone: '📉', titulo: `Nota crítica: ${rating}★`, servico: 'Gestão de crise de reputação' })
+      score += 20
+    } else if (rating < 4.2) {
+      pontos.push({ tipo: 'alerta', icone: '📊', titulo: `Nota mediana: ${rating}★`, servico: 'Otimização de GMN' })
+      score += 10
+    }
+  } else {
+    pontos.push({ tipo: 'alerta', icone: '❓', titulo: 'Sem nota visível', servico: 'Google Meu Negócio' })
+    score += 12
+  }
+
+  if (!empresa.telefone || empresa.telefone === 'Não informado') {
+    pontos.push({ tipo: 'alerta', icone: '📞', titulo: 'Sem telefone cadastrado', servico: 'Perfil no Google' })
+    score += 10
+  }
+
+  score = Math.min(score, 100)
+  const nivel = score >= 50 ? 'Alta' : score >= 20 ? 'Média' : 'Baixa'
+  const servicos = pontos.filter(p => p.servico).map(p => p.servico)
+
+  return { score, nivel, pontos, servicos }
+}
+
+function gerarPitchLocal(empresa, diagnostico, seuServico, nicho, cidade) {
+  const nome = empresa.nome.split(' ')[0]
+  const fraquezas = diagnostico.pontos.filter(p => p.tipo !== 'ok')
+
+  if (fraquezas.length === 0) {
+    return `${nome}, vi que vocês têm uma boa presença digital. Trabalho com ${seuServico || 'marketing digital'} e posso ajudar a escalar ainda mais os resultados de ${empresa.nome} em ${cidade || 'sua cidade'}.`
+  }
+
+  const principais = fraquezas.slice(0, 2).map(p => p.titulo.toLowerCase()).join(' e ')
+  return `${nome}, analisei a presença digital de ${empresa.nome} e identifiquei alguns pontos que podem estar limitando o crescimento: ${principais}. Trabalho com ${seuServico || 'soluções digitais'} para empresas de ${nicho || empresa.categoria} em ${cidade || 'sua cidade'} e já ajudei negócios similares a atrair mais clientes de forma previsível. Posso montar uma análise gratuita personalizada para vocês?`
+}
 
 // ─── Export para Vercel (serverless) ─────────────────────────────────────────
 export default app
