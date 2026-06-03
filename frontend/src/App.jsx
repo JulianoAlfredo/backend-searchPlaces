@@ -5,7 +5,7 @@ import ResultsTable from './components/ResultsTable';
 import MessageModal from './components/MessageModal';
 import DiagnoseModal from './components/DiagnoseModal';
 import HomeView from './components/HomeView';
-import ContactsView from './components/ContactsView';
+import ContactsTab from './components/ContactsTab';
 import { api } from './api';
 import * as store from './store';
 
@@ -197,7 +197,7 @@ export default function App() {
         )}
 
         {view === 'contatos' && (
-          <ContactsView
+          <ContactsTab
             leads={leads}
             stats={stats}
             onStatusChange={handleStatusChange}
