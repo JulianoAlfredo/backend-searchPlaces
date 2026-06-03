@@ -21,7 +21,8 @@ const SCORE_BG = (score) => {
 };
 
 export default function DiagnoseModal({ company, searchParams, onClose }) {
-  const localDiag = diagnoseCompany(company);
+  // Prefere o diagnóstico do backend (com análise do site); fallback local.
+  const localDiag = company.diagnostico || diagnoseCompany(company);
   const [aiDiag, setAiDiag] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);

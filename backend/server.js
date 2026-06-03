@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import axios from 'axios'
 import dotenv from 'dotenv'
+import https from 'https'
 
 dotenv.config()
 
@@ -292,7 +293,7 @@ app.get('/api/search', async (req, res) => {
     console.log('[DEMO] Retornando dados de demonstração...')
     const demoScored = DEMO_COMPANIES.map(c => {
       const d = gerarDiagnosticoLocal(c)
-      return { ...c, _score: d.score, _nivel: d.nivel }
+      return { ...c, diagnostico: d, _score: d.score, _nivel: d.nivel }
     })
     const demoFiltered = demoScored
       .filter(c => c._nivel !== 'Baixa')
@@ -372,10 +373,15 @@ app.get('/api/search', async (req, res) => {
       }
     })
 
+    // Analisa os sites em paralelo para qualificar sites ruins (não só "sem site")
+    const sitesSignals = await Promise.all(
+      companies.map(c => (c.site ? analisarSite(c.site) : Promise.resolve(null)))
+    )
+
     // Filtra oportunidade Baixa e ordena por score (melhores primeiro)
-    const scoredCompanies = companies.map(c => {
-      const d = gerarDiagnosticoLocal(c)
-      return { ...c, _score: d.score, _nivel: d.nivel }
+    const scoredCompanies = companies.map((c, i) => {
+      const d = gerarDiagnosticoLocal(c, sitesSignals[i])
+      return { ...c, diagnostico: d, _score: d.score, _nivel: d.nivel }
     })
     const resultCompanies = scoredCompanies
       .filter(c => c._nivel !== 'Baixa')
@@ -448,8 +454,9 @@ app.post('/api/diagnose', async (req, res) => {
 
   const openaiKey = process.env.OPENAI_API_KEY
 
-  // ─ Diagnóstico local (sem IA) ─────────────────────────────────────────────
-  const localDiagnosis = gerarDiagnosticoLocal(empresa)
+  // ─ Diagnóstico local (analisa o site, se houver) ──────────────────────────
+  const sinaisSite = empresa.site ? await analisarSite(empresa.site) : null
+  const localDiagnosis = gerarDiagnosticoLocal(empresa, sinaisSite)
 
   if (!openaiKey) {
     return res.json({
@@ -527,52 +534,180 @@ Responda APENAS em JSON válido com esta estrutura:
   }
 })
 
+// ─── Análise de qualidade do site ────────────────────────────────────────────
+// Domínios que NÃO são site próprio (rede social, agregadores de link, encurtadores)
+const DOMINIOS_NAO_SITE = [
+  'instagram.com', 'facebook.com', 'fb.com', 'fb.me', 'linktr.ee', 'linktree',
+  'wa.me', 'api.whatsapp.com', 'whatsapp.com', 'bit.ly', 'linkedin.com',
+  'twitter.com', 'x.com', 'tiktok.com', 'youtube.com', 'youtu.be',
+  'beacons.ai', 'linkbio', 'about.me', 'campsite.bio', 'bio.link', 'sites.google.com'
+]
+
+// Códigos de erro que indicam problema de certificado/TLS (site existe, mas SSL falho)
+const ERROS_TLS = new Set([
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN',
+  'ERR_TLS_CERT_ALTNAME_INVALID', 'EPROTO'
+])
+
+// Agente que ignora erros de certificado — usado só na 2ª tentativa, para
+// conseguir ler o conteúdo de sites com SSL mal configurado (sem mascarar a falha).
+const agenteInseguro = new https.Agent({ rejectUnauthorized: false })
+
+function buscarHtml(alvo, httpsAgent) {
+  return axios.get(alvo, {
+    timeout: 5000,
+    maxRedirects: 5,
+    validateStatus: () => true,
+    responseType: 'text',
+    maxContentLength: 2 * 1024 * 1024,
+    httpsAgent,
+    // UA de navegador real reduz bloqueios de WAF (que gerariam falso "fora do ar")
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
+    }
+  })
+}
+
+// Faz um fetch rápido do site e extrai sinais de qualidade.
+// Nunca lança — em qualquer falha retorna o site como inacessível.
+async function analisarSite(url) {
+  const inicio = Date.now()
+  try {
+    let alvo = String(url).trim()
+    if (!/^https?:\/\//i.test(alvo)) alvo = 'https://' + alvo
+
+    const hostname = new URL(alvo).hostname.replace(/^www\./i, '').toLowerCase()
+    const ehRedeSocial = DOMINIOS_NAO_SITE.some(d => hostname === d || hostname.endsWith('.' + d) || hostname.includes(d))
+
+    // Rede social: nem vale a pena baixar o HTML
+    if (ehRedeSocial) {
+      return { acessivel: true, statusCode: 200, https: alvo.startsWith('https'), responsivo: false, tempoMs: Date.now() - inicio, anoCopyright: null, certProblema: false, ehRedeSocial: true }
+    }
+
+    let resp
+    let certProblema = false
+    try {
+      resp = await buscarHtml(alvo)
+    } catch (err) {
+      // Erro de TLS: o site existe, mas tem certificado problemático.
+      // Tenta de novo ignorando o cert só para conseguir avaliar o conteúdo.
+      if (ERROS_TLS.has(err.code)) {
+        certProblema = true
+        resp = await buscarHtml(alvo, agenteInseguro)
+      } else {
+        throw err
+      }
+    }
+
+    const tempoMs = Date.now() - inicio
+    const html = typeof resp.data === 'string' ? resp.data : ''
+    const finalUrl = resp.request?.res?.responseUrl || alvo
+    const https = /^https:/i.test(finalUrl)
+    const responsivo = /<meta[^>]+name=["']?viewport["']?/i.test(html)
+
+    // Ano de copyright no rodapé (pega o mais recente encontrado)
+    const anos = [...html.matchAll(/(?:©|&copy;|copyright)[^0-9]{0,15}(20\d{2})/gi)].map(m => parseInt(m[1], 10))
+    const anoCopyright = anos.length ? Math.max(...anos) : null
+
+    return { acessivel: resp.status < 400, statusCode: resp.status, https, responsivo, tempoMs, anoCopyright, certProblema, ehRedeSocial: false }
+  } catch (err) {
+    return { acessivel: false, statusCode: null, https: false, responsivo: false, tempoMs: Date.now() - inicio, anoCopyright: null, certProblema: false, ehRedeSocial: false, erro: err.code || err.message }
+  }
+}
+
 // ─── Helpers de diagnóstico local ────────────────────────────────────────────
-function gerarDiagnosticoLocal(empresa) {
+// sinaisSite (opcional) = resultado de analisarSite(); quando ausente, o site
+// existente é tratado apenas como "tem site" (ex.: modo demonstração).
+function gerarDiagnosticoLocal(empresa, sinaisSite = null) {
   const pontos = []
   let score = 0
+  const anoAtual = new Date().getFullYear()
 
+  // ─── 1. Presença digital / qualidade do site ──────────────────────────────
   if (!empresa.site) {
-    pontos.push({ tipo: 'critico', icone: '🌐', titulo: 'Sem site próprio', servico: 'Criação de site profissional' })
+    pontos.push({ tipo: 'critico', icone: '🌐', titulo: 'Sem site próprio', descricao: 'A empresa não tem site. Quem pesquisa online não a encontra — oportunidade direta de vender presença digital.', servico: 'Criação de site profissional' })
     score += 35
+  } else if (sinaisSite) {
+    if (sinaisSite.ehRedeSocial) {
+      pontos.push({ tipo: 'critico', icone: '🔗', titulo: 'Usa apenas rede social/agregador de links', descricao: 'O "site" é um perfil de rede social ou Linktree, não um site próprio. Limita credibilidade e conversão.', servico: 'Site próprio profissional' })
+      score += 30
+    } else if (!sinaisSite.acessivel) {
+      pontos.push({ tipo: 'critico', icone: '💀', titulo: 'Site fora do ar ou com erro', descricao: `O site não respondeu corretamente (${sinaisSite.statusCode ? 'status ' + sinaisSite.statusCode : 'sem resposta'}). Cada visitante perdido é um cliente a menos.`, servico: 'Reconstrução do site' })
+      score += 25
+    } else {
+      let siteOk = true
+      if (sinaisSite.certProblema) {
+        pontos.push({ tipo: 'critico', icone: '🛡️', titulo: 'Certificado de segurança (SSL) com problema', descricao: 'O certificado do site é inválido ou está mal configurado — navegadores podem exibir alerta de "site não seguro", espantando clientes.', servico: 'Correção de SSL / novo site seguro' })
+        score += 18; siteOk = false
+      }
+      if (!sinaisSite.responsivo) {
+        pontos.push({ tipo: 'critico', icone: '📱', titulo: 'Site não responsivo (quebra no celular)', descricao: 'Sem adaptação para mobile, a maioria dos visitantes tem péssima experiência e abandona o site.', servico: 'Site responsivo (mobile-first)' })
+        score += 20; siteOk = false
+      }
+      if (!sinaisSite.https) {
+        pontos.push({ tipo: 'alerta', icone: '🔒', titulo: 'Site sem HTTPS (sem cadeado de segurança)', descricao: 'Navegadores marcam o site como "não seguro", o que afasta visitantes e prejudica o ranqueamento no Google.', servico: 'Migração para HTTPS' })
+        score += 12; siteOk = false
+      }
+      if (sinaisSite.tempoMs > 3000) {
+        pontos.push({ tipo: 'alerta', icone: '⏳', titulo: `Site lento (${(sinaisSite.tempoMs / 1000).toFixed(1)}s para abrir)`, descricao: 'Sites que demoram mais de 3s perdem boa parte dos visitantes antes de carregar.', servico: 'Otimização de performance' })
+        score += 10; siteOk = false
+      }
+      if (sinaisSite.anoCopyright && sinaisSite.anoCopyright < anoAtual - 2) {
+        pontos.push({ tipo: 'alerta', icone: '📅', titulo: `Site desatualizado (rodapé de ${sinaisSite.anoCopyright})`, descricao: 'Um site visivelmente antigo passa imagem de negócio parado e desatualizado.', servico: 'Modernização do site' })
+        score += 8; siteOk = false
+      }
+      if (siteOk) {
+        pontos.push({ tipo: 'ok', icone: '✅', titulo: 'Site sem problemas técnicos detectados', descricao: `Possui site funcional: ${empresa.site}`, servico: null })
+      }
+    }
+  } else {
+    pontos.push({ tipo: 'ok', icone: '✅', titulo: 'Tem site', descricao: `Possui site: ${empresa.site}`, servico: null })
   }
 
+  // ─── 2. Avaliações — volume ───────────────────────────────────────────────
   const reviews = empresa.totalAvaliacoes || 0
   if (reviews === 0) {
-    pontos.push({ tipo: 'critico', icone: '⭐', titulo: 'Nenhuma avaliação no Google', servico: 'Site com integração Google Meu Negócio' })
+    pontos.push({ tipo: 'critico', icone: '⭐', titulo: 'Nenhuma avaliação no Google', descricao: 'Sem avaliações, a empresa perde credibilidade. Consumidores confiam em reviews antes de comprar.', servico: 'Site com integração Google Meu Negócio' })
     score += 25
   } else if (reviews < 10) {
-    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Poucas avaliações (${reviews})`, servico: 'Site com página de depoimentos' })
+    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Poucas avaliações (${reviews})`, descricao: 'Com menos de 10 avaliações, o Google não destaca o negócio nas buscas locais.', servico: 'Site com página de depoimentos' })
     score += 15
   } else if (reviews < 50) {
-    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Avaliações abaixo do ideal (${reviews})`, servico: 'Site com integração de reviews' })
+    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Avaliações abaixo do ideal (${reviews})`, descricao: 'Concorrentes com 100+ avaliações aparecem primeiro no Google Maps.', servico: 'Site com integração de reviews' })
     score += 8
   }
 
+  // ─── 3. Avaliações — nota ─────────────────────────────────────────────────
   const rating = empresa.avaliacao
   if (rating !== null && rating !== undefined) {
     if (rating < 3.5) {
-      pontos.push({ tipo: 'critico', icone: '📉', titulo: `Nota crítica: ${rating}★`, servico: 'Novo site com foco em conversão' })
+      pontos.push({ tipo: 'critico', icone: '📉', titulo: `Nota crítica: ${rating}★`, descricao: 'Nota abaixo de 3.5 afasta clientes ativamente. Precisam de foco urgente em conversão.', servico: 'Novo site com foco em conversão' })
       score += 20
     } else if (rating < 4.2) {
-      pontos.push({ tipo: 'alerta', icone: '📊', titulo: `Nota mediana: ${rating}★`, servico: 'Modernização do site' })
+      pontos.push({ tipo: 'alerta', icone: '📊', titulo: `Nota mediana: ${rating}★`, descricao: 'Uma nota entre 4.2 e 5.0 aumenta bastante a taxa de conversão no Google Maps.', servico: 'Modernização do site' })
       score += 10
     }
   } else {
-    pontos.push({ tipo: 'alerta', icone: '❓', titulo: 'Sem nota visível', servico: 'Site com formulário de captação' })
+    pontos.push({ tipo: 'alerta', icone: '❓', titulo: 'Sem nota visível', descricao: 'Empresa sem avaliações visíveis — quase invisível para novos clientes.', servico: 'Site com formulário de captação' })
     score += 12
   }
 
+  // ─── 4. Contato ───────────────────────────────────────────────────────────
   if (!empresa.telefone || empresa.telefone === 'Não informado') {
-    pontos.push({ tipo: 'alerta', icone: '📞', titulo: 'Sem telefone cadastrado', servico: 'Site com botão de contato/WhatsApp' })
+    pontos.push({ tipo: 'alerta', icone: '📞', titulo: 'Sem telefone cadastrado', descricao: 'Clientes não conseguem ligar diretamente do Google. Perda direta de leads.', servico: 'Site com botão de contato/WhatsApp' })
     score += 10
   }
 
+  // ─── 5. Score final ───────────────────────────────────────────────────────
   score = Math.min(score, 100)
   const nivel = score >= 50 ? 'Alta' : score >= 20 ? 'Média' : 'Baixa'
+  const cor = score >= 50 ? 'vermelho' : score >= 20 ? 'amarelo' : 'verde'
   const servicos = pontos.filter(p => p.servico).map(p => p.servico)
 
-  return { score, nivel, pontos, servicos }
+  return { score, nivel, cor, pontos, servicos }
 }
 
 function gerarPitchLocal(empresa, diagnostico, seuServico, nicho, cidade) {
