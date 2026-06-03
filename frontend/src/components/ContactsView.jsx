@@ -103,7 +103,7 @@ export default function ContactsView({
                 </tr>
               )}
               {filtered.map((lead) => {
-                const nivel = NIVEL_STYLE[lead.diagnostico?.nivel] || NIVEL_STYLE.Baixa;
+                const nivel = NIVEL_STYLE[lead.diagnostico?.nivel] || NIVEL_STYLE.Frio;
                 const data = formatDate(lead.dataUltimoContato);
                 return (
                   <tr key={lead.id} className="hover:bg-slate-800/40 transition-colors align-top">

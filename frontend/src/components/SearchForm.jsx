@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { Search, MapPin, Briefcase, Loader2 } from 'lucide-react';
 
+// Nichos com maior potencial de comprar sistemas (operação complexa)
 const NICHO_SUGESTOES = [
-  'Contabilidade', 'Advocacia', 'Dentista', 'Academia', 'Salão de beleza',
-  'Restaurante', 'Clínica médica', 'Imobiliária', 'Pet shop', 'Escola',
-  'Engenharia civil', 'Arquitetura', 'Psicologia', 'Fisioterapia', 'Marketing digital',
+  'Distribuidora', 'Indústria', 'Transportadora', 'Atacadista', 'Construtora',
+  'Logística', 'Importadora', 'Concessionária', 'Cooperativa', 'Supermercado',
+  'Clínica', 'Laboratório', 'Rede de ensino', 'Contabilidade', 'Imobiliária',
 ];
+
+// Atalhos de alto potencial mostrados como chips
+const PRESETS = ['Distribuidora', 'Indústria', 'Transportadora', 'Construtora', 'Atacadista', 'Concessionária'];
 
 const CIDADE_SUGESTOES = [
   'São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'Curitiba', 'Porto Alegre',
@@ -56,7 +60,23 @@ export default function SearchForm({ onSearch, isLoading }) {
         />
       </div>
 
-      <div className="mt-5 flex items-center gap-4">
+      <div className="mt-4 flex items-center gap-2 flex-wrap">
+        <span className="text-slate-600 text-xs">Alto potencial:</span>
+        {PRESETS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => setNicho(p)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+              nicho === p ? 'bg-brand-600 text-white border-brand-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 flex items-center gap-4">
         <button
           type="submit"
           disabled={isLoading || !nicho.trim() || !cidade.trim()}
@@ -73,7 +93,7 @@ export default function SearchForm({ onSearch, isLoading }) {
           )}
         </button>
         <p className="text-slate-500 text-xs">
-          Cada busca alimenta seu acervo de oportunidades.
+          Salve as empresas que quiser acompanhar no funil.
         </p>
       </div>
     </form>

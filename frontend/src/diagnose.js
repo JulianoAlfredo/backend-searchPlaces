@@ -117,13 +117,13 @@ export function diagnoseCompany(company) {
   let nivel;
   let cor;
   if (score >= 50) {
-    nivel = 'Alta';
+    nivel = 'Quente';
     cor = 'vermelho';
   } else if (score >= 20) {
-    nivel = 'Média';
+    nivel = 'Morno';
     cor = 'amarelo';
   } else {
-    nivel = 'Baixa';
+    nivel = 'Frio';
     cor = 'verde';
   }
 

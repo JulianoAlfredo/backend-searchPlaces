@@ -292,11 +292,11 @@ app.get('/api/search', async (req, res) => {
   if (!isApiKeyConfigured()) {
     console.log('[DEMO] Retornando dados de demonstração...')
     const demoScored = DEMO_COMPANIES.map(c => {
-      const d = gerarDiagnosticoLocal(c)
+      const d = gerarDiagnosticoLocal(c, null, query)
       return { ...c, diagnostico: d, site_info: null, _score: d.score, _nivel: d.nivel }
     })
     const demoFiltered = demoScored
-      .filter(c => c._nivel !== 'Baixa')
+      .filter(c => c._nivel !== 'Frio')
       .sort((a, b) => b._score - a._score)
       .map(({ _score, _nivel, ...c }) => c)
     return res.json({ companies: demoFiltered, demo: true })
@@ -380,11 +380,11 @@ app.get('/api/search', async (req, res) => {
 
     // Filtra oportunidade Baixa e ordena por score (melhores primeiro)
     const scoredCompanies = companies.map((c, i) => {
-      const d = gerarDiagnosticoLocal(c, sitesSignals[i])
+      const d = gerarDiagnosticoLocal(c, sitesSignals[i], query)
       return { ...c, diagnostico: d, site_info: sitesSignals[i]?.info || null, _score: d.score, _nivel: d.nivel }
     })
     const resultCompanies = scoredCompanies
-      .filter(c => c._nivel !== 'Baixa')
+      .filter(c => c._nivel !== 'Frio')
       .sort((a, b) => b._score - a._score)
       .map(({ _score, _nivel, ...c }) => c)
 
@@ -394,6 +394,97 @@ app.get('/api/search', async (req, res) => {
     res.status(500).json({
       error: `Erro ao buscar no Google Maps: ${err.message}. Verifique sua API Key.`
     })
+  }
+})
+
+// ─── Destaques: Top oportunidades do Brasil (busca curada rotativa diária) ────
+const NICHOS_ALTO_POTENCIAL = [
+  'distribuidora', 'indústria', 'transportadora', 'atacadista', 'construtora',
+  'clínica', 'concessionária', 'cooperativa', 'rede de ensino', 'logística',
+  'importadora', 'supermercado', 'laboratório', 'frigorífico'
+]
+const CAPITAIS = [
+  'São Paulo', 'Rio de Janeiro', 'Belo Horizonte', 'Curitiba', 'Porto Alegre',
+  'Goiânia', 'Brasília', 'Salvador', 'Recife', 'Fortaleza', 'Campinas', 'Manaus'
+]
+
+// Seleção rotativa determinística (gira conforme o dia, sem aleatoriedade)
+function selecaoDoDia(lista, n, offset) {
+  const out = []
+  for (let i = 0; i < n; i++) out.push(lista[(offset + i) % lista.length])
+  return out
+}
+
+app.get('/api/highlights', async (req, res) => {
+  if (!isApiKeyConfigured()) {
+    const scored = DEMO_COMPANIES
+      .map(c => ({ ...c, diagnostico: gerarDiagnosticoLocal(c, null, c.categoria), site_info: null, origem: { nicho: c.categoria, cidade: 'Demo' } }))
+      .sort((a, b) => b.diagnostico.score - a.diagnostico.score)
+      .slice(0, 10)
+    return res.json({ companies: scored, demo: true, geradoEm: new Date().toISOString() })
+  }
+
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY
+    const dia = Math.floor(Date.now() / 86400000) // dia desde epoch → rotação diária
+    const nichos = selecaoDoDia(NICHOS_ALTO_POTENCIAL, 3, dia)
+    const cidades = selecaoDoDia(CAPITAIS, 3, dia * 2)
+    const queries = nichos.map((nicho, i) => ({ nicho, cidade: cidades[i] }))
+
+    // 1. Textsearch (1 página) por consulta curada
+    const buscas = await Promise.all(queries.map(({ nicho, cidade }) =>
+      axios.get('https://maps.googleapis.com/maps/api/place/textsearch/json', {
+        params: { query: `${nicho} ${cidade}`, language: 'pt-BR', key: apiKey },
+        timeout: 10000
+      }).then(r => ({ nicho, cidade, results: r.data.results || [] })).catch(() => ({ nicho, cidade, results: [] }))
+    ))
+
+    // 2. Candidatos preliminares (setor + porte), dedup por place_id
+    const mapa = new Map()
+    for (const { nicho, cidade, results } of buscas) {
+      for (const p of results) {
+        if (mapa.has(p.place_id)) continue
+        const empresa = {
+          id: p.place_id, nome: p.name, telefone: 'Não informado', site: null,
+          endereco: p.formatted_address || 'Não informado',
+          avaliacao: p.rating ?? null, totalAvaliacoes: p.user_ratings_total ?? 0,
+          categoria: formatCategory(p.types || []), status: 'novo'
+        }
+        const prelim = gerarDiagnosticoLocal(empresa, null, nicho).score
+        mapa.set(p.place_id, { empresa, nicho, cidade, prelim, types: p.types || [] })
+      }
+    }
+
+    // 3. Enriquecer os melhores candidatos com details + análise de site
+    const candidatos = [...mapa.values()].sort((a, b) => b.prelim - a.prelim).slice(0, 14)
+    const enriquecidos = await Promise.all(candidatos.map(async (cand) => {
+      try {
+        const det = await axios.get('https://maps.googleapis.com/maps/api/place/details/json', {
+          params: { place_id: cand.empresa.id, fields: 'formatted_phone_number,website,formatted_address,types', language: 'pt-BR', key: apiKey },
+          timeout: 8000
+        })
+        const d = det.data.result || {}
+        const empresa = {
+          ...cand.empresa,
+          telefone: d.formatted_phone_number || 'Não informado',
+          site: d.website || null,
+          endereco: d.formatted_address || cand.empresa.endereco,
+          categoria: formatCategory(d.types || cand.types)
+        }
+        const sinais = empresa.site ? await analisarSite(empresa.site) : null
+        const diag = gerarDiagnosticoLocal(empresa, sinais, cand.nicho)
+        return { ...empresa, diagnostico: diag, site_info: sinais?.info || null, origem: { nicho: cand.nicho, cidade: cand.cidade } }
+      } catch {
+        const diag = gerarDiagnosticoLocal(cand.empresa, null, cand.nicho)
+        return { ...cand.empresa, diagnostico: diag, site_info: null, origem: { nicho: cand.nicho, cidade: cand.cidade } }
+      }
+    }))
+
+    const companies = enriquecidos.sort((a, b) => b.diagnostico.score - a.diagnostico.score).slice(0, 10)
+    res.json({ companies, demo: false, geradoEm: new Date().toISOString(), consultas: queries })
+  } catch (err) {
+    console.error('[highlights erro]', err.message)
+    res.status(500).json({ error: `Erro ao gerar destaques: ${err.message}` })
   }
 })
 
@@ -456,7 +547,7 @@ app.post('/api/diagnose', async (req, res) => {
 
   // ─ Diagnóstico local (analisa o site, se houver) ──────────────────────────
   const sinaisSite = empresa.site ? await analisarSite(empresa.site) : null
-  const localDiagnosis = gerarDiagnosticoLocal(empresa, sinaisSite)
+  const localDiagnosis = gerarDiagnosticoLocal(empresa, sinaisSite, nicho)
 
   if (!openaiKey) {
     return res.json({
@@ -468,8 +559,8 @@ app.post('/api/diagnose', async (req, res) => {
 
   // ─ Diagnóstico com OpenAI ────────────────────────────────────────────────
   try {
-    const prompt = `Você é um consultor de marketing digital especialista em prospecção B2B.
-Analise os dados desta empresa e gere um diagnóstico de oportunidades:
+    const prompt = `Você é um consultor especialista em vender SISTEMAS sob medida, automação e gestão para empresas (prospecção B2B). Também ofereço sites quando faz sentido.
+Analise os dados desta empresa e gere um diagnóstico do potencial dela como cliente de sistemas:
 
 Empresa: ${empresa.nome}
 Categoria: ${empresa.categoria}
@@ -482,13 +573,13 @@ Endereço: ${empresa.endereco}
 Pontos fracos identificados automaticamente:
 ${localDiagnosis.pontos.filter(p => p.tipo !== 'ok').map(p => '- ' + p.titulo).join('\n') || '- Nenhum crítico identificado'}
 
-Meu serviço: ${seuServico || 'criação de sites e sistemas web'}
+Meu serviço: ${seuServico || 'sistemas sob medida, automação de processos e gestão (e sites quando útil)'}
 Nicho que prospecto: ${nicho || empresa.categoria}
 
 Gere:
-1. Um diagnóstico objetivo de 2-3 frases dos pontos fracos digitais desta empresa
-2. Um pitch de 3-4 frases para abordagem inicial (tom consultivo, não vendedor), focando APENAS em criação de site e sistemas — não mencione marketing digital, tráfego pago ou gestão de redes sociais
-3. Os 3 principais serviços de site/sistema que eu poderia oferecer para esta empresa
+1. Um diagnóstico objetivo de 2-3 frases sobre por que esta empresa é (ou não) um bom cliente para sistemas — considere o porte/volume, o setor e sinais de operação manual
+2. Um pitch de 3-4 frases para abordagem inicial (tom consultivo, não vendedor), focando em sistemas, automação e gestão de processos — pode mencionar site quando fizer sentido; não mencione tráfego pago ou gestão de redes sociais
+3. Os 3 principais serviços de sistema/automação (e site, se couber) que eu poderia oferecer para esta empresa
 
 Responda APENAS em JSON válido com esta estrutura:
 {
@@ -673,13 +764,37 @@ async function analisarSite(url) {
   }
 }
 
+// ─── Temperatura: potencial de comprar SISTEMA (não é fraqueza de site) ───────
+// O sinal se inverte em relação a "vender site": queremos empresa estabelecida,
+// de setor com operação complexa e com sinais de processos manuais.
+const SETOR_ALTA = /distribuidor|atacad|atacarej|ind[uú]stria|industrial|f[áa]bric|fabril|metal[uú]rgic|usina|frigor[íi]fic|log[íi]stic|transportad|transporte rodovi|construtor|constru[çc][ãa]o civil|incorporador|hospital|cl[íi]nic|laborat[óo]rio|concession[áa]ri|cooperativ|importador|exportador|supermercad|faculdade|universidade|col[ée]gio|rede de ensino|agroind|agroneg|minerador|farmac[êe]utic|e-?commerce/i
+const SETOR_MEDIA = /contabil|cont[áa]bil|advocac|advogad|jur[íi]dic|escrit[óo]rio|imobili[áa]ri|restaurante|academia|ag[êe]ncia|consultoria|engenharia|arquitetura|gr[áa]fic|oficina|autope[çc]a|odontol|com[ée]rcio|loja|varejo|hotel|pousada|marketing|escola/i
+
+function complexidadeSetor(empresa, nichoHint = '') {
+  const hay = `${empresa.categoria || ''} ${empresa.nome || ''} ${nichoHint || ''}`.toLowerCase()
+  if (SETOR_ALTA.test(hay)) return { nome: 'Alta', score: 40 }
+  if (SETOR_MEDIA.test(hay)) return { nome: 'Média', score: 22 }
+  return { nome: 'Baixa', score: 6 }
+}
+
+// Volume de operação (proxy por avaliações): mais volume = mais processos a sistematizar
+function porteTemperatura(reviews = 0) {
+  if (reviews >= 200) return 25
+  if (reviews >= 100) return 18
+  if (reviews >= 50) return 12
+  if (reviews >= 20) return 6
+  return 0
+}
+
 // ─── Helpers de diagnóstico local ────────────────────────────────────────────
 // sinaisSite (opcional) = resultado de analisarSite(); quando ausente, o site
 // existente é tratado apenas como "tem site" (ex.: modo demonstração).
-function gerarDiagnosticoLocal(empresa, sinaisSite = null) {
+// nichoHint = termo da busca, ajuda a classificar o setor.
+function gerarDiagnosticoLocal(empresa, sinaisSite = null, nichoHint = '') {
   const pontos = []
   let score = 0
   const anoAtual = new Date().getFullYear()
+  const reviews = empresa.totalAvaliacoes || 0
 
   // ─── 1. Presença digital / qualidade do site ──────────────────────────────
   if (!empresa.site) {
@@ -733,59 +848,44 @@ function gerarDiagnosticoLocal(empresa, sinaisSite = null) {
     pontos.push({ tipo: 'ok', icone: '✅', titulo: 'Tem site', descricao: `Possui site: ${empresa.site}`, servico: null })
   }
 
-  // ─── 2. Avaliações — volume ───────────────────────────────────────────────
-  const reviews = empresa.totalAvaliacoes || 0
-  if (reviews === 0) {
-    pontos.push({ tipo: 'critico', icone: '⭐', titulo: 'Nenhuma avaliação no Google', descricao: 'Sem avaliações, a empresa perde credibilidade. Consumidores confiam em reviews antes de comprar.', servico: 'Site com integração Google Meu Negócio' })
-    score += 25
-  } else if (reviews < 10) {
-    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Poucas avaliações (${reviews})`, descricao: 'Com menos de 10 avaliações, o Google não destaca o negócio nas buscas locais.', servico: 'Site com página de depoimentos' })
-    score += 15
-  } else if (reviews < 50) {
-    pontos.push({ tipo: 'alerta', icone: '⭐', titulo: `Avaliações abaixo do ideal (${reviews})`, descricao: 'Concorrentes com 100+ avaliações aparecem primeiro no Google Maps.', servico: 'Site com integração de reviews' })
-    score += 8
+  // ─── 2. Setor — potencial de sistema (complexidade operacional) ───────────
+  const setor = complexidadeSetor(empresa, nichoHint)
+  if (setor.nome === 'Alta') {
+    pontos.push({ tipo: 'alerta', icone: '🏭', titulo: 'Setor de operação complexa — forte candidato a sistema', descricao: 'Empresas deste setor lidam com estoque, equipe e processos que um sistema sob medida organiza e automatiza.', servico: 'Sistema de gestão sob medida' })
+  }
+  if (reviews >= 100) {
+    pontos.push({ tipo: 'alerta', icone: '📈', titulo: `Alto volume de clientes (${reviews} avaliações)`, descricao: 'Volume alto costuma significar muitos processos manuais — terreno fértil para automação e sistemas.', servico: 'Automação de processos' })
   }
 
-  // ─── 3. Avaliações — nota ─────────────────────────────────────────────────
-  const rating = empresa.avaliacao
-  if (rating !== null && rating !== undefined) {
-    if (rating < 3.5) {
-      pontos.push({ tipo: 'critico', icone: '📉', titulo: `Nota crítica: ${rating}★`, descricao: 'Nota abaixo de 3.5 afasta clientes ativamente. Precisam de foco urgente em conversão.', servico: 'Novo site com foco em conversão' })
-      score += 20
-    } else if (rating < 4.2) {
-      pontos.push({ tipo: 'alerta', icone: '📊', titulo: `Nota mediana: ${rating}★`, descricao: 'Uma nota entre 4.2 e 5.0 aumenta bastante a taxa de conversão no Google Maps.', servico: 'Modernização do site' })
-      score += 10
-    }
-  } else {
-    pontos.push({ tipo: 'alerta', icone: '❓', titulo: 'Sem nota visível', descricao: 'Empresa sem avaliações visíveis — quase invisível para novos clientes.', servico: 'Site com formulário de captação' })
-    score += 12
-  }
-
-  // ─── 4. Contato ───────────────────────────────────────────────────────────
+  // ─── 3. Contato ───────────────────────────────────────────────────────────
   if (!empresa.telefone || empresa.telefone === 'Não informado') {
-    pontos.push({ tipo: 'alerta', icone: '📞', titulo: 'Sem telefone cadastrado', descricao: 'Clientes não conseguem ligar diretamente do Google. Perda direta de leads.', servico: 'Site com botão de contato/WhatsApp' })
-    score += 10
+    pontos.push({ tipo: 'alerta', icone: '📞', titulo: 'Sem telefone cadastrado', descricao: 'Sem telefone visível — sinal de cadastro/operação descuidada, que um sistema de contatos resolve.', servico: 'Cadastro e canais de contato' })
+    score += 6
   }
 
-  // ─── 5. Score final ───────────────────────────────────────────────────────
-  score = Math.min(score, 100)
-  const nivel = score >= 50 ? 'Alta' : score >= 20 ? 'Média' : 'Baixa'
-  const cor = score >= 50 ? 'vermelho' : score >= 20 ? 'amarelo' : 'verde'
-  const servicos = pontos.filter(p => p.servico).map(p => p.servico)
+  // ─── 4. Temperatura (potencial de comprar sistema) ────────────────────────
+  // setor + porte (volume) + sinais de operação manual. O `score` acumulado nas
+  // seções de site representa a evidência de operação não-sistematizada.
+  const manual = Math.min(score, 25)
+  const temperatura = Math.min(setor.score + porteTemperatura(reviews) + manual, 100)
+  const nivel = temperatura >= 60 ? 'Quente' : temperatura >= 35 ? 'Morno' : 'Frio'
+  const cor = temperatura >= 60 ? 'vermelho' : temperatura >= 35 ? 'amarelo' : 'verde'
+  const servicos = [...new Set(pontos.filter(p => p.servico).map(p => p.servico))]
 
-  return { score, nivel, cor, pontos, servicos }
+  return { score: temperatura, nivel, cor, pontos, servicos, setor: setor.nome }
 }
 
 function gerarPitchLocal(empresa, diagnostico, seuServico, nicho, cidade) {
   const nome = empresa.nome.split(' ')[0]
+  const servico = seuServico || 'sistemas sob medida, automação e sites'
   const fraquezas = diagnostico.pontos.filter(p => p.tipo !== 'ok')
 
   if (fraquezas.length === 0) {
-    return `${nome}, vi que vocês têm uma boa presença digital. Trabalho com ${seuServico || 'criação de sites e sistemas'} e posso ajudar a evoluir ainda mais a presença online de ${empresa.nome} em ${cidade || 'sua cidade'}.`
+    return `${nome}, ${empresa.nome} parece bem estruturada. Trabalho com ${servico} e ajudo empresas a automatizar processos e ganhar eficiência operacional. Faz sentido a gente trocar uma ideia?`
   }
 
   const principais = fraquezas.slice(0, 2).map(p => p.titulo.toLowerCase()).join(' e ')
-  return `${nome}, analisei a presença digital de ${empresa.nome} e identifiquei alguns pontos que podem estar limitando o crescimento: ${principais}. Trabalho com ${seuServico || 'criação de sites e sistemas'} para empresas de ${nicho || empresa.categoria} em ${cidade || 'sua cidade'} e já ajudei negócios similares a atrair mais clientes. Posso apresentar uma proposta personalizada para vocês?`
+  return `${nome}, analisei a operação de ${empresa.nome} e vi pontos que podem estar custando tempo e clientes: ${principais}. Trabalho com ${servico} para empresas de ${nicho || empresa.categoria} em ${cidade || 'sua região'} e ajudo a organizar e automatizar o que hoje é feito na mão. Posso mostrar uma proposta personalizada?`
 }
 
 // ─── Export para Vercel (serverless) ─────────────────────────────────────────

@@ -6,6 +6,7 @@ import MessageModal from './components/MessageModal';
 import DiagnoseModal from './components/DiagnoseModal';
 import HomeView from './components/HomeView';
 import ContactsTab from './components/ContactsTab';
+import LeadDetailModal from './components/LeadDetailModal';
 import { api } from './api';
 import * as store from './store';
 
@@ -19,6 +20,7 @@ export default function App() {
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDiagnoseOpen, setIsDiagnoseOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [tick, setTick] = useState(0); // força releitura do acervo
 
   const refreshStore = () => setTick((t) => t + 1);
@@ -26,9 +28,8 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const leads = useMemo(() => store.getLeads(), [tick]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const topLeads = useMemo(() => store.getTopOportunidades(12), [tick]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const stats = useMemo(() => store.getStats(), [tick]);
+  const savedIds = useMemo(() => new Set(leads.map((l) => l.id)), [leads]);
 
   useEffect(() => {
     api.health().then((r) => r.json()).then((d) => setIsDemo(d.demo)).catch(() => {});
@@ -54,9 +55,9 @@ export default function App() {
     }
   };
 
-  // Salvar uma empresa da busca no acervo (inicia o rastreamento)
+  // Salvar uma empresa (da busca ou dos destaques) no acervo
   const handleSave = (company) => {
-    store.saveLead(company, searchParams);
+    store.saveLead(company, company.origem || searchParams);
     setCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, _saved: true, status: 'novo' } : c)));
     refreshStore();
   };
@@ -75,8 +76,9 @@ export default function App() {
     refreshStore();
   };
 
-  const handleGenerateMessage = (company) => { setSelectedCompany(company); setIsModalOpen(true); };
-  const handleDiagnose = (company) => { setSelectedCompany(company); setIsDiagnoseOpen(true); };
+  const handleGenerateMessage = (company) => { setSelectedCompany(company); setIsDetailOpen(false); setIsModalOpen(true); };
+  const handleDiagnose = (company) => { setSelectedCompany(company); setIsDetailOpen(false); setIsDiagnoseOpen(true); };
+  const handleOpenDetail = (lead) => { setSelectedCompany(lead); setIsDetailOpen(true); };
 
   const handleExportCSV = () => {
     const rows = view === 'busca' ? companies : leads;
@@ -151,11 +153,11 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
         {view === 'inicio' && (
           <HomeView
-            topLeads={topLeads}
             stats={stats}
+            savedIds={savedIds}
+            onSave={handleSave}
             onDiagnose={handleDiagnose}
             onGenerateMessage={handleGenerateMessage}
-            onGoToSearch={() => setView('busca')}
           />
         )}
 
@@ -206,6 +208,7 @@ export default function App() {
             onRemove={handleRemove}
             onDiagnose={handleDiagnose}
             onGenerateMessage={handleGenerateMessage}
+            onOpenDetail={handleOpenDetail}
           />
         )}
       </main>
@@ -215,6 +218,18 @@ export default function App() {
       )}
       {isDiagnoseOpen && selectedCompany && (
         <DiagnoseModal company={selectedCompany} searchParams={searchParams} onClose={() => setIsDiagnoseOpen(false)} />
+      )}
+      {isDetailOpen && selectedCompany && (
+        <LeadDetailModal
+          lead={selectedCompany}
+          onClose={() => setIsDetailOpen(false)}
+          onStatusChange={handleStatusChange}
+          onNotasChange={handleNotasChange}
+          onRegistrarContato={handleRegistrarContato}
+          onRemove={handleRemove}
+          onDiagnose={handleDiagnose}
+          onGenerateMessage={handleGenerateMessage}
+        />
       )}
     </div>
   );

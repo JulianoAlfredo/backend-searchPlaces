@@ -147,3 +147,24 @@ export function removeLead(id) {
   delete map[id];
   writeMap(map);
 }
+
+// ─── Cache dos destaques diários (Top do Brasil) ──────────────────────────────
+const HL_KEY = 'cacador_highlights_v1';
+
+function hoje() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Retorna os destaques cacheados se forem de hoje; senão null. */
+export function getCachedHighlights() {
+  try {
+    const c = JSON.parse(localStorage.getItem(HL_KEY) || 'null');
+    return c && c.date === hoje() ? c.companies : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedHighlights(companies) {
+  localStorage.setItem(HL_KEY, JSON.stringify({ date: hoje(), companies }));
+}
